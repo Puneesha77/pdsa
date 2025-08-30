@@ -1,287 +1,333 @@
 """
-Priority Chat System - Flask Backend
-Real-time chat with priority queues and spam detection
+Priority Chat System - Combined Application
+A real-time chat system with Priority Queue, Batch Queue, and Retry Queue
+
+Author: Team Project
+Date: August 2025
 """
 
-from flask import Flask, render_template, request
-from flask_socketio import SocketIO, emit
+from flask import Flask, render_template, jsonify
+from flask_socketio import SocketIO
+from flask_cors import CORS
 import logging
-from dotenv import load_dotenv
+import sys
 import os
-import re
-from datetime import datetime
 
-# Load environment variables
-load_dotenv()
+# Import message systems
+from models.priority_queue import PriorityMessageQueue
+from models.enhanced_message_system import EnhancedMessageSystem
+from handlers.socket_handlers import ChatSocketHandlers
 
-class SpamDetector:
-    """Spam detection for chat messages"""
-    
-    def __init__(self):
-        self.spam_keywords = [
-            "buy now", "free money", "visit this site",
-            "click here", "subscribe", "lottery",
-            "win cash", "make money fast", "100% free",
-            "limited offer", "act now", "double your",
-            "work from home", "earn $", "make $$$",
-            "guaranteed", "no risk", "urgent", "congratulations",
-            "winner", "claim now", "exclusive deal"
-        ]
-        
-        self.repeated_char_pattern = re.compile(r"(.)\1{4,}")
-        self.url_pattern = re.compile(r"(https?://\S+|www\.\S+)", re.IGNORECASE)
-        self.repeated_word_pattern = re.compile(r"\b(\w+)\s+\1\s+\1", re.IGNORECASE)
-        self.caps_pattern = re.compile(r"[A-Z]{10,}")
-    
-    def normalize(self, text: str) -> str:
-        """Remove punctuation/symbols and lowercase the text."""
-        return re.sub(r"[^a-z0-9\s]", "", text.lower())
-    
-    def is_spam(self, text: str) -> bool:
-        """Check if message is spam"""
-        if not text:
-            return False
-        
-        text_lower = text.lower()
-        text_clean = self.normalize(text)
-        
-        # Keyword-based detection
-        for keyword in self.spam_keywords:
-            if keyword in text_clean:
-                print(f"SPAM DETECTED: Keyword '{keyword}' in message: '{text[:50]}...'")
-                return True
-        
-        # Repeated character spam
-        if self.repeated_char_pattern.search(text_lower):
-            print(f"SPAM DETECTED: Repeated characters in: '{text[:50]}...'")
-            return True
-        
-        # Repeated word spam
-        if self.repeated_word_pattern.search(text_lower):
-            print(f"SPAM DETECTED: Repeated words in: '{text[:50]}...'")
-            return True
-        
-        # URL detection
-        if self.url_pattern.search(text):
-            print(f"SPAM DETECTED: URL found in: '{text[:50]}...'")
-            return True
-        
-        # Message length check
-        if len(text) > 300:
-            print(f"SPAM DETECTED: Message too long ({len(text)} chars): '{text[:50]}...'")
-            return True
-        
-        # Too many capitals
-        if self.caps_pattern.search(text):
-            print(f"SPAM DETECTED: Too many capitals in: '{text[:50]}...'")
-            return True
-        
-        return False
 
 def create_app():
     """Application factory pattern"""
     app = Flask(__name__)
-    app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
+    app.config['SECRET_KEY'] = 'your-secret-key-change-in-production'
     
+    # Enable CORS for all routes
+    CORS(app, resources={r"/*": {"origins": "*"}})
+    
+    # Configure logging
     if app.debug:
         logging.basicConfig(level=logging.DEBUG)
+        app.logger.setLevel(logging.DEBUG)
     
     return app
 
+
 def create_socketio(app):
-    """Create SocketIO instance"""
+    """Create and configure SocketIO instance"""
     return SocketIO(
         app,
         cors_allowed_origins="*",
-        logger=False,
-        engineio_logger=False,
-        async_mode='threading'
+        logger=True,
+        engineio_logger=True,
+        async_mode='threading',
+        ping_timeout=60,
+        ping_interval=25
     )
+
 
 # Create Flask app and SocketIO
 app = create_app()
 socketio = create_socketio(app)
 
-# Initialize spam detector
-spam_detector = SpamDetector()
+# Initialize message systems with error handling
+try:
+    basic_message_system = PriorityMessageQueue(max_history_size=1000)
+    print("✅ Basic Priority Queue initialized")
+    
+    enhanced_message_system = EnhancedMessageSystem(
+        max_history_size=1000,
+        min_batch_size=5,
+        max_batch_size=50,
+        batch_timeout=2.0,
+        max_retries=5
+    )
+    print("✅ Enhanced Message System initialized")
+    
+    # Initialize handlers
+    chat_handlers = ChatSocketHandlers(enhanced_message_system.priority_queue, socketio)
+    print("✅ Socket handlers initialized")
+    
+except Exception as e:
+    print(f"🚨 Error initializing systems: {e}")
+    sys.exit(1)
 
-# Get access code from environment
-ACCESS_CODE = os.getenv("CHAT_ACCESS_CODE", "supersecret123")
-
-# Track connected users
-connected_users = {}  # session_id -> username
-
-@socketio.on("connect")
-def handle_connect():
-    print(f"Client connected: {request.sid}")
-
-@socketio.on("disconnect")
-def handle_disconnect():
-    if request.sid in connected_users:
-        username = connected_users[request.sid]
-        print(f"User '{username}' disconnected: {request.sid}")
-        del connected_users[request.sid]
-    else:
-        print(f"Client disconnected: {request.sid}")
-
-@socketio.on("login")
-def handle_login(data):
-    """Handle user login with secret key"""
-    try:
-        username = data.get("username", "").strip()
-        secret = data.get("secretKey", "").strip()
-        
-        if not username or not secret:
-            emit("login_error", "Username and secret key required")
-            return
-        
-        if secret != ACCESS_CODE:
-            emit("login_error", "Invalid secret key")
-            print(f"Failed login attempt - User: {username}, Key: {secret}")
-            return
-        
-        # Check if username already taken
-        if username in connected_users.values():
-            emit("login_error", "Username already taken")
-            return
-        
-        # Success - store user
-        connected_users[request.sid] = username
-        emit("login_success", {"username": username})
-        print(f"User '{username}' logged in successfully")
-        
-        # Send welcome message
-        welcome_msg = {
-            "user": "System",
-            "text": f"Welcome {username}!",
-            "priority": 3,
-            "priority_name": "NORMAL",
-            "is_spam": False,
-            "alert_message": None,
-            "timestamp": datetime.now().isoformat()
-        }
-        emit("new_message", welcome_msg)
-        
-    except Exception as e:
-        print(f"Login error: {e}")
-        emit("login_error", "Login failed")
-
-@socketio.on("send_message")
-def handle_message(data):
-    """Handle incoming messages with spam detection"""
-    try:
-        if request.sid not in connected_users:
-            print(f"Message from unauthorized user: {request.sid}")
-            return
-        
-        user = connected_users[request.sid]
-        message = data.get("message", "").strip()
-        priority = data.get("priority", 3)
-        
-        if not message:
-            return
-        
-        print(f"Message from '{user}': '{message}'")
-        
-        # Convert priority to int
-        try:
-            priority = int(priority) if priority is not None else 3
-            if priority not in [1, 2, 3, 4]:
-                priority = 3
-        except (ValueError, TypeError):
-            priority = 3
-        
-        # Check for spam
-        is_spam = spam_detector.is_spam(message)
-        
-        # If spam detected, force priority to 4 (LOW)
-        if is_spam:
-            priority = 4
-            alert_message = "DETECTED"
-            print(f"SPAM MESSAGE from '{user}': '{message}'")
-        else:
-            alert_message = None
-        
-        # Priority names mapping
-        priority_names = {
-            1: "URGENT",
-            2: "HIGH", 
-            3: "NORMAL",
-            4: "LOW"
-        }
-        
-        msg_data = {
-            "user": user,
-            "text": message,
-            "priority": priority,
-            "priority_name": priority_names.get(priority, "NORMAL"),
-            "is_spam": is_spam,
-            "alert_message": alert_message,
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        # Broadcast to all connected clients
-        emit("new_message", msg_data, broadcast=True)
-        print(f"Broadcasted message: Priority={priority_names.get(priority)}, Spam={is_spam}")
-        
-    except Exception as e:
-        print(f"Message handling error: {e}")
 
 @app.route('/')
 def index():
-    """Serve the chat interface"""
-    return render_template('index.html')
+    """Main chat page route"""
+    print("📄 Serving Combined Priority Chat interface")
+    try:
+        return render_template('index.html')
+    except Exception as e:
+        print(f"🚨 Error serving index.html: {e}")
+        return f"<h1>Error: {e}</h1><p>Check if templates/index.html exists</p>", 500
+
+# --------------------
+# 🔧 ADDED: Dependency checking function
+# --------------------
+
+def check_dependencies():
+    """Check if required files exist"""
+    required_files = [
+        'templates/index.html',
+        'models/priority_queue.py',
+        'models/enhanced_message_system.py',
+        'handlers/socket_handlers.py'
+    ]
+    
+    missing_files = []
+    for file_path in required_files:
+        if not os.path.exists(file_path):
+            missing_files.append(file_path)
+    
+    if missing_files:
+        print("🚨 Missing required files:")
+        for file in missing_files:
+            print(f"   ❌ {file}")
+        return False
+    
+    print("✅ All required files found")
+    return True
+
+
+# --------------------
+# 🔧 ADDED: Error Handlers for better debugging
+# --------------------
+
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({'error': 'Endpoint not found'}), 404
+
+
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({'error': 'Internal server error'}), 500
+
+
+# --------------------
+# 🌐 Monitoring Routes (with error handling)
+# --------------------
 
 @app.route('/health')
 def health_check():
     """Health check endpoint"""
-    return {
-        'status': 'healthy',
-        'system': 'Priority Chat System',
-        'version': '1.0.0',
-        'connected_users': len(connected_users)
-    }
+    try:
+        stats = enhanced_message_system.get_comprehensive_stats()
+        return jsonify({
+            'status': 'healthy',
+            'system': 'Combined Priority Chat System',
+            'version': '2.0.0',
+            'components': ['Priority Queue', 'Batch Queue', 'Retry Queue'],
+            'stats': stats.get('system_overview', {})
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 
 @app.route('/stats')
 def get_stats():
-    """Get system statistics"""
-    return {
-        'connected_users': len(connected_users),
-        'access_code_configured': bool(ACCESS_CODE),
-        'spam_detection': 'active',
-        'uptime': 'running'
-    }
+    """Get combined system statistics"""
+    try:
+        return jsonify({
+            'basic_priority_queue': basic_message_system.get_queue_stats(),
+            'enhanced_message_system': enhanced_message_system.get_comprehensive_stats(),
+            'queue_status': enhanced_message_system.get_queue_status(),
+            'connected_users': chat_handlers.get_connected_user_count() if chat_handlers else 0
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/batch_stats')
+def batch_stats():
+    """Batch queue statistics endpoint"""
+    try:
+        stats = enhanced_message_system.batch_queue.get_stats()
+        return jsonify(stats)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/retry_stats')
+def retry_stats():
+    """Retry queue statistics endpoint"""
+    try:
+        stats = enhanced_message_system.retry_queue.get_queue_contents()
+        return jsonify({
+            'queue_size': len(stats),
+            'failed_messages': stats,
+            'total_retries': sum(msg.get('retry_count', 0) for msg in stats)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# --------------------
+# 🛠️ Admin Routes (with error handling)
+# --------------------
+
+@app.route('/admin/batch/force-send', methods=['GET', 'POST'])
+def force_send_batches():
+    """Force send pending batches"""
+    try:
+        count = enhanced_message_system.force_send_pending_batches()
+        return jsonify({'action': 'force_send_batches', 'messages_sent': count, 'success': True})
+    except Exception as e:
+        return jsonify({'action': 'force_send_batches', 'error': str(e), 'success': False}), 500
+
+
+@app.route('/admin/retry/force-all', methods=['GET', 'POST'])
+def force_retry_all():
+    """Force retry failed messages"""
+    try:
+        count = enhanced_message_system.retry_failed_messages()
+        return jsonify({'action': 'force_retry_all', 'messages_marked_for_retry': count, 'success': True})
+    except Exception as e:
+        return jsonify({'action': 'force_retry_all', 'error': str(e), 'success': False}), 500
+
+
+@app.route('/admin/clear-all', methods=['GET', 'POST'])
+def clear_all():
+    """Clear all queues"""
+    try:
+        cleared_counts = enhanced_message_system.clear_all_queues()
+        return jsonify({'action': 'clear_all_queues', 'cleared': cleared_counts, 'success': True})
+    except Exception as e:
+        return jsonify({'action': 'clear_all_queues', 'error': str(e), 'success': False}), 500
+
+
+@app.route('/admin/detailed-stats')
+def detailed_stats():
+    """Detailed system stats for debugging"""
+    try:
+        return jsonify({
+            'comprehensive_stats': enhanced_message_system.get_comprehensive_stats(),
+            'queue_contents': {
+                'batch_queue': enhanced_message_system.batch_queue.get_stats(),
+                'retry_queue': enhanced_message_system.retry_queue.get_queue_contents()
+            }
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# --------------------
+# 🔧 Error Handlers
+# --------------------
+
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({'error': 'Endpoint not found'}), 404
+
+
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({'error': 'Internal server error'}), 500
+
+
+# --------------------
+# 🚀 Entry Point
+# --------------------
+
+def check_dependencies():
+    """Check if required files exist"""
+    required_files = [
+        'templates/index.html',
+        'models/priority_queue.py',
+        'models/enhanced_message_system.py',
+        'handlers/socket_handlers.py'
+    ]
+    
+    missing_files = []
+    for file_path in required_files:
+        if not os.path.exists(file_path):
+            missing_files.append(file_path)
+    
+    if missing_files:
+        print("🚨 Missing required files:")
+        for file in missing_files:
+            print(f"   ❌ {file}")
+        return False
+    
+    print("✅ All required files found")
+    return True
+
 
 def main():
-    """Main application entry point"""
-    print("=" * 50)
-    print("Priority Chat System Starting...")
-    print("=" * 50)
-    print("Main Interface: http://localhost:5000")
-    print("Health Check:   http://localhost:5000/health")
-    print("Statistics:     http://localhost:5000/stats")
-    print("=" * 50)
-    print("Features:")
-    print("  ✅ Auto-priority detection")
-    print("  ✅ Spam detection and filtering")
-    print("  ✅ Real-time messaging")
-    print("  ✅ Secret key authentication")
-    print("=" * 50)
-    print(f"Access Code: {ACCESS_CODE}")
-    print("=" * 50)
+    """Main entry point"""
+    print("=" * 70)
+    print("🚀 Combined Priority Chat System Starting...")
+    print("=" * 70)
     
+    # Check dependencies first
+    if not check_dependencies():
+        print("🚨 Cannot start server - missing required files")
+        sys.exit(1)
+    
+    print("📍 Main Interface:    http://localhost:5000")
+    print("📊 Health Check:      http://localhost:5000/health") 
+    print("📈 Statistics:        http://localhost:5000/stats")
+    print("📊 Batch Stats:       http://localhost:5000/batch_stats")
+    print("📊 Retry Stats:       http://localhost:5000/retry_stats")
+    print("📊 Detailed Stats:    http://localhost:5000/admin/detailed-stats")
+    print("🔧 Force Batch Send:  http://localhost:5000/admin/batch/force-send")
+    print("🔄 Force Retry All:   http://localhost:5000/admin/retry/force-all")
+    print("🧹 Clear All Queues:  http://localhost:5000/admin/clear-all")
+    print("=" * 70)
+    print("🏗️ System Architecture:")
+    print("  ✅ Priority Queue (Min-Heap) - message prioritization")
+    print("  ✅ Circular Queue - history (1000 messages)")
+    print("  ✅ Batch Queue (FIFO) - groups 5-50 msgs, 2s timeout")
+    print("  ✅ Retry Queue (Deque) - failed message handling, 5 retries")
+    print("=" * 70)
+    print("🌐 Starting server...")
+
     try:
         socketio.run(
             app,
             debug=True,
             port=5000,
-            host='127.0.0.1',
-            allow_unsafe_werkzeug=True
+            host='0.0.0.0',  # Allow external connections
+            allow_unsafe_werkzeug=True,
+            use_reloader=False  # Prevent double initialization
         )
     except KeyboardInterrupt:
-        print("\nChat system shutting down...")
+        print("\n👋 Shutting down Chat System...")
+        try:
+            enhanced_message_system.shutdown()
+        except:
+            pass
     except Exception as e:
-        print(f"Fatal error: {str(e)}")
+        print(f"🚨 Fatal error: {str(e)}")
+        try:
+            enhanced_message_system.shutdown()
+        except:
+            pass
+        sys.exit(1)
+
 
 if __name__ == '__main__':
     main()
