@@ -19,6 +19,7 @@ class PriorityMessageQueue:
     - Automatic priority detection based on keywords
     - Message history storage (circular queue, max 1000 by default)
     - FIFO ordering for same-priority messages
+    - Offline message creation support
     """
 
     def __init__(self, max_history_size: int = 1000):
@@ -96,8 +97,8 @@ class PriorityMessageQueue:
         # Add to circular history queue
         self.history.enqueue(message_obj)
 
-        print(f"📥 [{detection_method.upper()}] Added {self.get_priority_name(priority)} priority message")
-        print(f"🔢 Queue size: {len(self.priority_queue)} | History size: {len(self.history.get_all())}")
+        print(f"[{detection_method.upper()}] Added {self.get_priority_name(priority)} priority message")
+        print(f"Queue size: {len(self.priority_queue)} | History size: {len(self.history.get_all())}")
 
         return message_obj
 
@@ -113,7 +114,7 @@ class PriorityMessageQueue:
 
         priority, counter, message_obj = heapq.heappop(self.priority_queue)
 
-        print(f"📤 Delivering {message_obj['priority_name']} message: {message_obj['text'][:50]}...")
+        print(f"Delivering {message_obj['priority_name']} message: {message_obj['text'][:50]}...")
         return message_obj
 
     def peek_next_message(self) -> Optional[Dict]:
@@ -215,7 +216,7 @@ class PriorityMessageQueue:
         """
         cleared_count = len(self.priority_queue)
         self.priority_queue.clear()
-        print(f"🧹 Cleared {cleared_count} messages from priority queue")
+        print(f"Cleared {cleared_count} messages from priority queue")
         return cleared_count
 
     def clear_all(self) -> Dict:
@@ -232,8 +233,49 @@ class PriorityMessageQueue:
         self.history.clear()
         self.message_counter = 0
 
-        print(f"🧹 Cleared everything: {queue_count} queue, {history_count} history")
+        print(f"Cleared everything: {queue_count} queue, {history_count} history")
         return {
             'queue_cleared': queue_count,
             'history_cleared': history_count
         }
+
+    def create_offline_message(self, message: str, user: str, recipient: str, 
+                              manual_priority: Optional[int] = None) -> Dict:
+        """
+        Create a message object for offline storage (without adding to queue)
+        
+        Args:
+            message: The message text
+            user: Username of sender
+            recipient: Target recipient username
+            manual_priority: Override auto-detection (1-4, None for auto)
+        
+        Returns:
+            Dict containing the message object
+        """
+        self.message_counter += 1
+        timestamp = time.time()
+
+        # Determine priority
+        if manual_priority:
+            priority = manual_priority
+            detection_method = "manual"
+        else:
+            priority = self.auto_detect_priority(message)
+            detection_method = "auto"
+
+        # Create message object for offline storage
+        message_obj = {
+            'text': message,
+            'priority': priority,
+            'priority_name': self.get_priority_name(priority),
+            'user': user,
+            'recipient': recipient,
+            'timestamp': timestamp,
+            'counter': self.message_counter,
+            'detection_method': detection_method,
+            'is_offline_message': True
+        }
+
+        print(f"Created offline message for {recipient} from {user}")
+        return message_obj

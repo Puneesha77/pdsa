@@ -48,6 +48,7 @@ class UserManager:
         self.online_users: Set[str] = set()  # Set of online usernames
         self.socket_to_user: Dict[str, str] = {}  # socket_id -> username
         self.failed_login_attempts = defaultdict(int)  # Track failed logins
+        self.offline_message_queues: Dict[str, List[Dict]] = defaultdict(list)  # username -> messages
         
     def hash_password(self, password: str) -> str:
         """
@@ -112,7 +113,7 @@ class UserManager:
         self.users[username] = user
         self.sessions[session_id] = username
         
-        print(f"👤 New user registered: {username}")
+        print(f"New user registered: {username}")
         
         return {
             'success': True,
@@ -153,7 +154,7 @@ class UserManager:
         # Reset failed attempts
         self.failed_login_attempts[username] = 0
         
-        print(f"🔑 User logged in: {username}")
+        print(f"User logged in: {username}")
         
         return {
             'success': True,
@@ -197,7 +198,7 @@ class UserManager:
         self.online_users.add(username)
         self.socket_to_user[socket_id] = username
         
-        print(f"🟢 {username} is now online")
+        print(f"{username} is now online")
         return True
     
     def set_user_offline(self, socket_id: str) -> Optional[str]:
@@ -221,7 +222,7 @@ class UserManager:
         self.online_users.discard(username)
         del self.socket_to_user[socket_id]
         
-        print(f"🔴 {username} went offline")
+        print(f"{username} went offline")
         return username
     
     def get_user_by_socket(self, socket_id: str) -> Optional[str]:
@@ -316,5 +317,82 @@ class UserManager:
         if user.socket_id:
             self.set_user_offline(user.socket_id)
         
-        print(f"👋 {username} logged out")
+        print(f"{username} logged out")
         return True
+
+    def queue_message_for_offline_user(self, username: str, message_obj: Dict) -> bool:
+        """
+        Store a message for an offline user
+        
+        Args:
+            username: Target username
+            message_obj: Message object to store
+            
+        Returns:
+            True if queued, False if user doesn't exist
+        """
+        if username not in self.users:
+            return False
+        
+        self.offline_message_queues[username].append(message_obj)
+        print(f"Queued message for offline user {username} (queue size: {len(self.offline_message_queues[username])})")
+        return True
+
+    def get_offline_messages(self, username: str) -> List[Dict]:
+        """
+        Get and clear all offline messages for a user
+        
+        Args:
+            username: Username
+            
+        Returns:
+            List of queued message objects
+        """
+        if username not in self.offline_message_queues:
+            return []
+        
+        messages = self.offline_message_queues[username].copy()
+        self.offline_message_queues[username].clear()
+        
+        if messages:
+            print(f"Delivering {len(messages)} offline messages to {username}")
+        
+        return messages
+
+    def get_offline_message_count(self, username: str) -> int:
+        """
+        Get count of offline messages for a user
+        
+        Args:
+            username: Username
+            
+        Returns:
+            Number of queued messages
+        """
+        return len(self.offline_message_queues.get(username, []))
+
+    def clear_offline_messages(self, username: str) -> int:
+        """
+        Clear offline messages for a user
+        
+        Args:
+            username: Username
+            
+        Returns:
+            Number of messages cleared
+        """
+        count = len(self.offline_message_queues.get(username, []))
+        self.offline_message_queues[username].clear()
+        return count
+    
+    def is_user_online(self, username: str) -> bool:
+        """
+        Check if a user is currently online
+        
+        Args:
+            username: Username to check
+            
+        Returns:
+            True if online, False if offline or user doesn't exist
+        """
+        return username in self.online_users
