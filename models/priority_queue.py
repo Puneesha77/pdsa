@@ -21,7 +21,7 @@ class PriorityMessageQueue:
     - FIFO ordering for same-priority messages
     """
 
-    def __init__(self, max_history_size: int = 1000):
+    def __init__(self, max_history_size: int = 10):
         """
         Initialize the priority message queue
 
@@ -29,7 +29,7 @@ class PriorityMessageQueue:
             max_history_size: Maximum number of messages to keep in history
         """
         self.priority_queue = []  # Min-heap for priority ordering
-        self.history = CircularQueue(max_size=max_history_size)  # Circular queue for history
+        self.history = CircularQueue(max_size=max_history_size)  # Rolling history
         self.message_counter = 0  # Ensures FIFO for same priority
 
         # Priority configuration
@@ -86,28 +86,22 @@ class PriorityMessageQueue:
             'detection_method': detection_method
         }
 
-        # Add to priority queue (heapq uses min-heap)
-        # Format: (priority, counter, message_obj)
+        # Add to active priority queue (for delivery)
         heapq.heappush(
             self.priority_queue,
             (priority, self.message_counter, message_obj)
         )
 
-        # Add to circular history queue
+        # Add to circular history queue (auto-truncates)
         self.history.enqueue(message_obj)
 
         print(f"📥 [{detection_method.upper()}] Added {self.get_priority_name(priority)} priority message")
-        print(f"🔢 Queue size: {len(self.priority_queue)} | History size: {len(self.history.get_all())}")
+        print(f"🔢 Active queue size: {len(self.priority_queue)} | History size: {len(self.history.get_all())}")
 
         return message_obj
 
     def get_next_message(self) -> Optional[Dict]:
-        """
-        Get and remove the highest priority message from queue
-
-        Returns:
-            Message object with highest priority, or None if queue empty
-        """
+        """Get and remove the highest priority message from queue"""
         if not self.priority_queue:
             return None
 
@@ -117,12 +111,7 @@ class PriorityMessageQueue:
         return message_obj
 
     def peek_next_message(self) -> Optional[Dict]:
-        """
-        Look at the highest priority message without removing it
-
-        Returns:
-            Message object with highest priority, or None if queue empty
-        """
+        """Look at the highest priority message without removing it"""
         if not self.priority_queue:
             return None
 
@@ -130,28 +119,17 @@ class PriorityMessageQueue:
         return message_obj
 
     def get_history(self) -> List[Dict]:
-        """
-        Get all messages from history
-
-        Returns:
-            List of message objects in chronological order
-        """
+        """Get last N messages from history"""
         return self.history.get_all()
 
     def get_queue_stats(self) -> Dict:
-        """
-        Get statistics about the current queue state
-
-        Returns:
-            Dict with queue statistics
-        """
+        """Get statistics about the current queue state"""
         stats = {
             'total_messages': len(self.priority_queue),
             'history_size': len(self.history.get_all()),
             'priority_breakdown': {}
         }
 
-        # Count messages by priority
         for priority, counter, msg in self.priority_queue:
             priority_name = self.get_priority_name(priority)
             stats['priority_breakdown'][priority_name] = \
@@ -160,71 +138,35 @@ class PriorityMessageQueue:
         return stats
 
     def auto_detect_priority(self, message: str) -> int:
-        """
-        Automatically detect message priority based on content
-
-        Args:
-            message: The message text to analyze
-
-        Returns:
-            Priority level (1-4)
-        """
+        """Automatically detect message priority based on content"""
         message_lower = message.lower().strip()
 
-        # Check for urgent keywords
         if any(keyword in message_lower for keyword in self.URGENT_KEYWORDS):
             return 1  # URGENT
-
-        # Check for high priority keywords
         if any(keyword in message_lower for keyword in self.HIGH_KEYWORDS):
             return 2  # HIGH
-
-        # Check for @mentions (indicates direct communication)
         if '@' in message and len(message) > 1:
             return 2  # HIGH
-
-        # Check for ALL CAPS (might indicate urgency)
         if len(message) > 5 and message.isupper():
             return 2  # HIGH
-
-        # Check for multiple exclamation marks
         if message.count('!') >= 3:
             return 2  # HIGH
 
-        # Default to normal priority
         return 3  # NORMAL
 
     def get_priority_name(self, priority: int) -> str:
-        """
-        Convert priority number to human-readable name
-
-        Args:
-            priority: Priority number (1-4)
-
-        Returns:
-            Priority name string
-        """
+        """Convert priority number to human-readable name"""
         return self.PRIORITY_NAMES.get(priority, "NORMAL")
 
     def clear_queue(self) -> int:
-        """
-        Clear all messages from the priority queue (keeps history)
-
-        Returns:
-            Number of messages that were cleared
-        """
+        """Clear only the active priority queue (keeps history)"""
         cleared_count = len(self.priority_queue)
         self.priority_queue.clear()
-        print(f"🧹 Cleared {cleared_count} messages from priority queue")
+        print(f"🧹 Cleared {cleared_count} messages from active priority queue")
         return cleared_count
 
     def clear_all(self) -> Dict:
-        """
-        Clear both queue and history
-
-        Returns:
-            Dict with counts of cleared items
-        """
+        """Clear both active queue and history"""
         queue_count = len(self.priority_queue)
         history_count = len(self.history.get_all())
 
@@ -232,7 +174,7 @@ class PriorityMessageQueue:
         self.history.clear()
         self.message_counter = 0
 
-        print(f"🧹 Cleared everything: {queue_count} queue, {history_count} history")
+        print(f"🧹 Cleared everything: {queue_count} active queue, {history_count} history")
         return {
             'queue_cleared': queue_count,
             'history_cleared': history_count
