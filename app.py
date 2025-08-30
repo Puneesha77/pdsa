@@ -289,7 +289,7 @@ def handle_login(data):
         #}
         
         # Add welcome message to queue and broadcast organization
-        message_queue.add_message(welcome_msg)
+       # message_queue.add_message(welcome_msg)
         organized_messages = message_queue.get_all_messages_organized()
         emit("message_organization", organized_messages, broadcast=True)
         
