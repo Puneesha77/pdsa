@@ -1,128 +1,110 @@
-from flask_socketio import emit
-from flask import request
-from utils.message_utils import validate_message, validate_username, format_message_for_client
-from utils.spam_utils import SpamDetector
-from typing import Dict
-from dotenv import load_dotenv
-import os
+"""
+Socket Event Handlers for Chat System
+Now includes BatchQueue + RetryQueue + SessionQueue integration.
+"""
 
-# Load environment variables
-load_dotenv()
+from flask_socketio import emit
+from utils.message_utils import validate_message, validate_username, format_message_for_client
+from typing import Dict
+from models.batch_queue import BatchQueue
+from models.retry_queue import RetryQueue
+from models.session_queue import SessionQueue
 
 
 class ChatSocketHandlers:
     """
     Handles all WebSocket events for the chat system
+    with BatchQueue + RetryQueue + SessionQueue integration
     """
-
-    SPAM_LIMIT = 5  # Number of spam messages before user is temporarily muted
-
+    
     def __init__(self, message_system, socketio):
-        """
-        Initialize socket handlers
-        """
         self.message_system = message_system
         self.socketio = socketio
-        self.connected_users = {}  # Track connected users and spam counts
-        self.spam_detector = SpamDetector()  # Spam detector
+        self.connected_users = {}
 
+        # Queues
+        self.batch_queue = BatchQueue(min_batch_size=5, max_batch_size=50)
+        self.retry_queue = RetryQueue(max_retries=5)
+        self.session_queue = SessionQueue()
+
+        # Register all socket event handlers
         self.register_handlers()
-
+    
     def register_handlers(self):
         """Register all socket event handlers"""
+        
         @self.socketio.on('connect')
         def handle_connect():
             return self.on_connect()
-
-        @self.socketio.on('disconnect')
+        
+        @self.socketio.on('disconnect') 
         def handle_disconnect():
             return self.on_disconnect()
-
+        
         @self.socketio.on('send_message')
         def handle_send_message(data):
             return self.on_send_message(data)
-
+        
         @self.socketio.on('get_stats')
         def handle_get_stats():
             return self.on_get_stats()
-
+        
         @self.socketio.on_error_default
         def handle_error(e):
             return self.on_error(e)
-
+    
     def on_connect(self):
-        """Handle new connection with access code auth"""
-        user_id = request.sid
-        access_code = request.args.get("code")  # query param from client
+        """Handle new user connection"""
+        print('✅ New user connected to Priority Chat!')
 
-        if access_code != os.getenv("CHAT_ACCESS_CODE"):
-            print(f"❌ Unauthorized connection attempt: {user_id}")
-            emit("error", {"type": "auth_error", "message": "Invalid access code"})
-            return False  # reject connection
+        # 🔑 Add login event to session queue
+        self.session_queue.enqueue("Anonymous", "login")
 
-        self.connected_users[user_id] = {"spam_count": 0, "username": None}
-        print(f"✅ Authorized user connected: {user_id}")
+        history = self.message_system.history.get_all()
+        print(f'📊 Sending {len(history)} historical messages to new user')
 
+        for msg in history:
+            formatted_msg = format_message_for_client(msg)
+            emit('new_message', formatted_msg)
+
+        stats = self.message_system.get_queue_stats()
+        emit('queue_stats', stats)
+        
         return True
 
     def on_disconnect(self):
         """Handle user disconnection"""
-        user_id = request.sid
-        if user_id in self.connected_users:
-            del self.connected_users[user_id]
         print('❌ User disconnected from Priority Chat')
-        return True
 
+        # 🔑 Add logout event to session queue
+        self.session_queue.enqueue("Anonymous", "logout")
+
+        return True
+    
     def on_send_message(self, data: Dict):
         """Handle incoming message from user"""
-        user_id = request.sid
-
         try:
             raw_message = data.get('message', '')
             raw_user = data.get('user', 'Anonymous')
             manual_priority = data.get('priority', None)
 
-            # Validate message
+            print(f'📨 Processing message from {raw_user}: "{raw_message}"')
+
+            # ✅ Validate message
             message_validation = validate_message(raw_message)
             if not message_validation['valid']:
-                emit('error', {'type': 'validation_error', 'message': message_validation['error']})
+                emit('error', {
+                    'type': 'validation_error',
+                    'message': message_validation['error']
+                })
                 return False
 
-            # Validate username
+            # ✅ Validate username
             user_validation = validate_username(raw_user)
             clean_user = user_validation['sanitized_username']
             clean_message = message_validation['sanitized_message']
 
-            # Save username for connected user
-            if user_id in self.connected_users:
-                self.connected_users[user_id]["username"] = clean_user
-
-            # Run spam detection
-            is_spam = self.spam_detector.is_spam(clean_message)
-            if is_spam:
-                self.connected_users[user_id]["spam_count"] += 1
-
-                # Private alert for the sender
-                emit('spam_alert', {
-                    'message': 'Your message was flagged as spam and will be sent with lowest priority.'
-                }, to=user_id)
-
-                # Public alert for all other users
-                emit('spam_alert', {
-                    'user': clean_user,
-                    'message': f'⚠️ {clean_user} sent a message flagged as spam!',
-                    'highlight': True
-                }, broadcast=True, include_self=False)
-
-            # Check spam limit
-            if self.connected_users[user_id]["spam_count"] > self.SPAM_LIMIT:
-                emit('error', {
-                    'type': 'spam_limit',
-                    'message': 'You are temporarily muted for sending too many spam messages.'
-                })
-                return False
-
-            # Convert manual priority to int if provided
+            # ✅ Priority override (if provided)
             if manual_priority is not None:
                 try:
                     manual_priority = int(manual_priority)
@@ -131,74 +113,94 @@ class ChatSocketHandlers:
                 except (ValueError, TypeError):
                     manual_priority = None
 
-            # If spam, force priority = 4 (lowest)
-            effective_priority = 4 if is_spam else manual_priority
-
-            # Add message to priority queue
+            # ✅ Add message to priority system
             message_obj = self.message_system.add_message(
-                clean_message,
-                clean_user,
-                effective_priority
+                clean_message, 
+                clean_user, 
+                manual_priority
             )
-            message_obj["is_spam"] = is_spam
 
-            # Broadcast next message
+            # ✅ Get next message in priority order
             next_message = self.message_system.get_next_message()
-            if next_message:
-                formatted_msg = format_message_for_client(next_message)
-                formatted_msg["is_spam"] = next_message.get("is_spam", False)
+            if not next_message:
+                return False
 
-                # Highlight spam messages for all users
-                if formatted_msg["is_spam"]:
-                    formatted_msg["priority_name"] = "SPAM"
-                    formatted_msg["priority"] = 4
-                    formatted_msg["highlighted_spam"] = True
-                    formatted_msg["alert_message"] = f'⚠️ {next_message["user"]} sent a spam message!'
+            formatted_msg = format_message_for_client(next_message)
 
-                emit('new_message', formatted_msg, broadcast=True)
+            # 🔹 Instead of sending directly → enqueue into BatchQueue
+            self.batch_queue.enqueue(formatted_msg)
+
+            # 🔹 Try flushing if enough messages in batch
+            batch = self.batch_queue.flush()
+            if batch:
+                try:
+                    emit('new_message_batch', batch, broadcast=True)
+                    print(f"✅ Broadcasted batch of {len(batch)} messages")
+                except Exception as e:
+                    print(f"🚨 Batch send failed: {str(e)}")
+                    for msg in batch:
+                        self.retry_queue.enqueue(msg)
+
+            # 🔹 Process RetryQueue (resend failed messages if ready)
+            self.process_retry_queue()
 
             return True
 
         except Exception as e:
             print(f'🚨 Error processing message: {str(e)}')
-            emit('error', {'type': 'processing_error', 'message': 'Failed to process message'})
+            emit('error', {
+                'type': 'processing_error', 
+                'message': 'Failed to process message'
+            })
             return False
+
+    def process_retry_queue(self):
+        """Check and resend failed messages when backoff is ready"""
+        while True:
+            retry_msg = self.retry_queue.process()
+            if not retry_msg:
+                break
+            try:
+                emit('new_message', retry_msg, broadcast=True)
+                print("🔁 Retried and delivered a failed message")
+            except Exception as e:
+                print(f"🚨 Retry send failed again: {str(e)}")
+                self.retry_queue.enqueue(retry_msg)
 
     def on_get_stats(self):
         """Handle request for queue statistics"""
         try:
             stats = self.message_system.get_queue_stats()
+            stats.update({
+                "batch_queue_size": self.batch_queue.size(),
+                "retry_queue_size": self.retry_queue.size(),
+                "session_queue_size": self.session_queue.size()
+            })
             emit('queue_stats', stats)
+            print(f'📊 Sent queue stats: {stats}')
         except Exception as e:
+            print(f'🚨 Error getting stats: {str(e)}')
             emit('error', {'type': 'stats_error', 'message': 'Failed to get statistics'})
-
+    
     def on_error(self, e):
         """Handle socket errors"""
         print(f'🚨 Socket Error: {str(e)}')
         return True
 
     def broadcast_system_message(self, message: str, priority: int = 3):
-        """Broadcast a system message to all users with spam check"""
+        """Broadcast a system message to all users"""
         try:
-            is_spam = self.spam_detector.is_spam(message)
-            effective_priority = 4 if is_spam else priority
-
             system_msg = self.message_system.add_message(
-                message, "SYSTEM", effective_priority
+                message, "SYSTEM", manual_priority=priority
             )
-
             next_message = self.message_system.get_next_message()
             if next_message:
                 formatted_msg = format_message_for_client(next_message)
-                formatted_msg["is_spam"] = is_spam
-                if is_spam:
-                    formatted_msg["priority_name"] = "SPAM"
-                    formatted_msg["priority"] = 4
-                    formatted_msg["highlighted_spam"] = True
-                    formatted_msg["alert_message"] = f'⚠️ SYSTEM message flagged as spam!'
-
-                emit('new_message', formatted_msg, broadcast=True)
-
+                self.batch_queue.enqueue(formatted_msg)
+                # Force flush for system messages (immediate delivery)
+                batch = self.batch_queue.force_flush()
+                emit('new_message_batch', batch, broadcast=True)
+                print(f'📢 System message broadcasted: {message}')
         except Exception as e:
             print(f'🚨 Error broadcasting system message: {str(e)}')
 

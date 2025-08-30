@@ -2,663 +2,249 @@
 <html>
 <head>
     <title>Priority Chat System 🚨</title>
+    <!-- Socket.IO -->
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script>
-        if (typeof io === 'undefined') {
-            document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"><\/script>');
-        }
+    if (typeof io === 'undefined') {
+        document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"><\/script>');
+    }
     </script>
 
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        
-        body { 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-
-        .chat-container {
+        body {
+            font-family: Arial, sans-serif;
             max-width: 900px;
-            width: 100%;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+        }
+        #messages {
+            border: 1px solid #ddd;
+            height: 400px;
+            overflow-y: scroll;
+            padding: 10px;
+            margin-bottom: 20px;
             background-color: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            overflow: hidden;
-            display: none;
+            border-radius: 8px;
         }
-
-        .header { 
-            text-align: center; 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-            color: white; 
-            padding: 25px; 
+        .message {
+            margin: 8px 0;
+            padding: 10px;
+            border-radius: 8px;
+            border-left: 4px solid #ccc;
+            background-color: #f9f9f9;
+            position: relative;
         }
-        
-        .header h1 { font-size: 2.2em; margin-bottom: 10px; font-weight: 300; }
-        .header p { opacity: 0.9; font-size: 1.1em; }
-
-        .chat-content { padding: 30px; }
-
-        #messages { 
-            border: 1px solid #e0e0e0; 
-            height: 400px; 
-            overflow-y: scroll; 
-            padding: 20px; 
-            margin-bottom: 25px; 
-            background-color: #fafafa; 
-            border-radius: 15px; 
-        }
-        
-        .message { 
-            margin: 12px 0; 
-            padding: 15px; 
-            border-radius: 12px; 
-            border-left: 4px solid #ccc; 
-            background-color: white; 
-            position: relative; 
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-        }
-        
         .message.urgent { background-color: #ffebee; border-left-color: #f44336; animation: urgentPulse 2s infinite; }
         .message.high { background-color: #fff3e0; border-left-color: #ff9800; }
         .message.normal { background-color: #f1f8e9; border-left-color: #4caf50; }
-        .message.low { background-color: #f3e5f5; border-left: 4px solid #9c27b0; }
-        
-        .message.spam-message .spam-word { 
-    color: #ff1744; 
-    font-weight: 900; 
-    background: linear-gradient(45deg, #ffebee, #ffcdd2);
-    padding: 4px 8px;
-    border-radius: 6px;
-    font-size: 13px;
-    text-shadow: 0 1px 2px rgba(255, 23, 68, 0.3);
-    border: 2px solid #ff1744;
-    animation: dangerBlink 1s infinite;
-}
-
-.message.spam-message {
-    padding-right: 90px;
-    border: 2px solid #ff1744 !important;
-    background: linear-gradient(135deg, #ffebee 0%, #fce4ec 100%) !important;
-    animation: dangerShake 0.5s infinite;
-}
-
-.message.spam-message .spam-alert { 
-    position: absolute; 
-    top: 8px; 
-    right: 8px; 
-    background: linear-gradient(45deg, #ff1744, #d50000);
-    color: white; 
-    padding: 8px 12px; 
-    font-size: 9px; 
-    font-weight: 900; 
-    border-radius: 20px;
-    box-shadow: 0 4px 12px rgba(255, 23, 68, 0.6);
-    z-index: 15;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    border: 2px solid white;
-    animation: dangerPulse 0.8s infinite;
-}
-
-@keyframes dangerBlink {
-    0%, 50% { opacity: 1; }
-    51%, 100% { opacity: 0.7; }
-}
-
-@keyframes dangerShake {
-    0%, 100% { transform: translateX(0); }
-    25% { transform: translateX(-1px); }
-    75% { transform: translateX(1px); }
-}
-
-@keyframes dangerPulse {
-    0% { transform: scale(1); box-shadow: 0 4px 12px rgba(255, 23, 68, 0.6); }
-    50% { transform: scale(1.05); box-shadow: 0 6px 20px rgba(255, 23, 68, 0.8); }
-    100% { transform: scale(1); box-shadow: 0 4px 12px rgba(255, 23, 68, 0.6); }
-}
-        
-        @keyframes urgentPulse { 
-            0% { box-shadow: 0 2px 8px rgba(0,0,0,0.05), 0 0 0 0 rgba(244, 67, 54, 0.7); } 
-            70% { box-shadow: 0 2px 8px rgba(0,0,0,0.05), 0 0 0 10px rgba(244, 67, 54, 0); } 
-            100% { box-shadow: 0 2px 8px rgba(0,0,0,0.05), 0 0 0 0 rgba(244, 67, 54, 0); } 
+        .message.low { background-color: #f3e5f5; border-left-color: #9c27b0; }
+        @keyframes urgentPulse {
+            0% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(244, 67, 54, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0); }
         }
-        
-        .message-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-        .message-user { font-weight: 600; color: #333; font-size: 14px; }
-        .message-priority { font-size: 11px; padding: 4px 10px; border-radius: 20px; color: white; font-weight: bold; text-transform: uppercase; }
+        .message-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+        .message-user { font-weight: bold; color: #333; }
+        .message-priority { font-size: 12px; padding: 2px 8px; border-radius: 12px; color: white; font-weight: bold; }
         .priority-urgent { background-color: #f44336; }
         .priority-high { background-color: #ff9800; }
         .priority-normal { background-color: #4caf50; }
         .priority-low { background-color: #9c27b0; }
-        .message-text { margin-top: 8px; line-height: 1.5; color: #444; }
-        
-        .priority-buttons { 
-            display: flex; 
-            gap: 8px; 
-            margin-bottom: 20px; 
-            flex-wrap: wrap;
-        }
-        
-        .priority-btn { 
-            padding: 12px 16px; 
-            border: none; 
-            border-radius: 25px; 
-            cursor: pointer; 
-            font-size: 13px; 
-            font-weight: 600; 
-            color: white; 
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        }
-        
-        .priority-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.2); }
-        .priority-btn.active { transform: scale(1.05); box-shadow: 0 0 0 3px rgba(255,255,255,0.5), 0 6px 20px rgba(0,0,0,0.2); }
-        
-        .message-input-section { 
-            display: flex; 
-            gap: 15px; 
-            align-items: center;
-        }
-        
-        #messageInput { 
-            flex: 1; 
-            padding: 15px 20px; 
-            border: 2px solid #e0e0e0; 
-            border-radius: 25px; 
-            font-size: 15px; 
-            transition: border-color 0.3s ease;
-            outline: none;
-        }
-        
-        #messageInput:focus { border-color: #667eea; }
-        
-        #sendBtn { 
-            padding: 15px 30px; 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-            color: white; 
-            border: none; 
-            border-radius: 25px; 
-            cursor: pointer; 
-            font-weight: 600; 
-            font-size: 15px;
-            transition: transform 0.2s ease;
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
-        }
-        
-        #sendBtn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4); }
-        
-        #status { 
-            margin: 15px 0; 
-            font-weight: 600; 
-            text-align: center; 
-            padding: 12px; 
-            border-radius: 25px; 
-        }
-        
+        .message-text { margin-top: 5px; line-height: 1.4; }
+        .input-section { background-color: white; padding: 20px; border-radius: 8px; border: 1px solid #ddd; }
+        .user-input { display: flex; gap: 10px; margin-bottom: 15px; }
+        #userInput { flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
+        .priority-section { display: flex; gap: 10px; align-items: center; margin-bottom: 15px; flex-wrap: wrap; }
+        .priority-buttons { display: flex; gap: 5px; }
+        .priority-btn { padding: 8px 12px; border: none; border-radius: 5px; cursor: pointer; font-size: 12px; font-weight: bold; color: white; }
+        .priority-btn.active { box-shadow: 0 0 0 2px #333; }
+        .message-input-section { display: flex; gap: 10px; }
+        #messageInput { flex: 1; padding: 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; }
+        #sendBtn { padding: 12px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        #sendBtn:hover { transform: translateY(-1px); box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
+        #status { margin: 10px 0; font-weight: bold; text-align: center; padding: 8px; border-radius: 5px; }
         .connected { color: #4caf50; background-color: #e8f5e8; }
         .disconnected { color: #f44336; background-color: #ffebee; }
-
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 20px;
-            padding: 15px;
-            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-            border-radius: 15px;
-            border-left: 4px solid #667eea;
-        }
-
-        .user-avatar {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-            font-size: 16px;
-        }
-
-        .user-details h3 {
-            margin: 0;
-            color: #333;
-            font-size: 16px;
-        }
-
-        .user-details p {
-            margin: 2px 0 0 0;
-            color: #666;
-            font-size: 12px;
-        }
-
-        /* Beautiful Login Modal */
-        #loginModal { 
-            display: flex; 
-            position: fixed; 
-            z-index: 999; 
-            left: 0; 
-            top: 0; 
-            width: 100%; 
-            height: 100%; 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            justify-content: center; 
-            align-items: center; 
-        }
-
-        #loginBox { 
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(20px);
-            padding: 50px 40px;
-            border-radius: 25px;
-            max-width: 450px;
-            width: 90%;
-            text-align: center;
-            box-shadow: 0 25px 50px rgba(0,0,0,0.2);
-            border: 1px solid rgba(255,255,255,0.2);
-        }
-
-        #loginBox::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: linear-gradient(45deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
-            border-radius: 25px;
-            pointer-events: none;
-        }
-
-        .login-title {
-            font-size: 2.5em;
-            margin-bottom: 10px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            font-weight: 700;
-        }
-
-        .login-subtitle {
-            color: #666;
-            margin-bottom: 35px;
-            font-size: 16px;
-            opacity: 0.8;
-        }
-
-        .input-group {
-            position: relative;
-            margin-bottom: 25px;
-        }
-
-        .input-group input {
-            width: 100%;
-            padding: 18px 25px;
-            border: 2px solid #e0e0e0;
-            border-radius: 15px;
-            font-size: 16px;
-            transition: all 0.3s ease;
-            background: rgba(255,255,255,0.9);
-            outline: none;
-        }
-
-        .input-group input:focus {
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-            transform: translateY(-2px);
-        }
-
-        .input-group label {
-            position: absolute;
-            left: 25px;
-            top: 18px;
-            color: #999;
-            transition: all 0.3s ease;
-            pointer-events: none;
-            background: rgba(255,255,255,0.9);
-            padding: 0 8px;
-        }
-
-        .input-group input:focus + label,
-        .input-group input:not(:placeholder-shown) + label {
-            top: -12px;
-            left: 20px;
-            font-size: 12px;
-            color: #667eea;
-            font-weight: 600;
-        }
-
-        #loginBtn {
-            width: 100%;
-            padding: 18px;
-            border: none;
-            border-radius: 15px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3);
-            margin-top: 10px;
-        }
-
-        #loginBtn:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 15px 35px rgba(102, 126, 234, 0.4);
-        }
-
-        #loginBtn:active {
-            transform: translateY(-1px);
-        }
-
-        #loginError {
-            color: #f44336;
-            font-weight: 600;
-            margin-top: 20px;
-            padding: 12px;
-            background: rgba(244, 67, 54, 0.1);
-            border-radius: 10px;
-            border: 1px solid rgba(244, 67, 54, 0.2);
-        }
-
-        .floating-shapes {
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            z-index: -1;
-        }
-
-        .shape {
-            position: absolute;
-            opacity: 0.1;
-            animation: float 15s infinite linear;
-        }
-
-        .shape:nth-child(1) {
-            top: 10%;
-            left: 20%;
-            animation-delay: 0s;
-        }
-
-        .shape:nth-child(2) {
-            top: 70%;
-            left: 80%;
-            animation-delay: -5s;
-        }
-
-        .shape:nth-child(3) {
-            top: 30%;
-            right: 20%;
-            animation-delay: -10s;
-        }
-
-        @keyframes float {
-            0% { transform: translateY(0px) rotate(0deg); }
-            33% { transform: translateY(-30px) rotate(120deg); }
-            66% { transform: translateY(30px) rotate(240deg); }
-            100% { transform: translateY(0px) rotate(360deg); }
-        }
-
-        @media (max-width: 768px) {
-            #loginBox {
-                padding: 40px 30px;
-                margin: 20px;
-            }
-            
-            .login-title {
-                font-size: 2em;
-            }
-            
-            .priority-buttons {
-                justify-content: center;
-            }
-            
-            .message-input-section {
-                flex-direction: column;
-                gap: 10px;
-            }
-            
-            #sendBtn {
-                width: 100%;
-            }
-        }
+        .priority-separator { text-align: center; margin: 15px 0 10px 0; font-size: 12px; font-weight: bold; color: #666; border-bottom: 2px solid #eee; padding-bottom: 5px; }
+        .batch-separator { text-align: center; margin: 10px 0; font-size: 11px; color: #999; }
+        /* ✅ New stats panel */
+        #statsPanel { margin: 15px 0; padding: 10px; background: #fff; border-radius: 8px; font-size: 13px; border: 1px solid #ddd; }
     </style>
 </head>
 <body>
-    <div class="chat-container" id="chatContainer">
-        <div class="header">
-            <h1>🚨 Priority Chat System</h1>
-            <p>Messages are automatically prioritized! Urgent messages appear first.</p>
-        </div>
-
-        <div class="chat-content">
-            <div id="status" class="disconnected">Status: Disconnected</div>
-            
-            <div class="user-info" id="userInfo" style="display: none;">
-                <div class="user-avatar" id="userAvatar"></div>
-                <div class="user-details">
-                    <h3 id="userName"></h3>
-                    <p>Connected and ready to chat</p>
-                </div>
-            </div>
-
-            <div id="messages"></div>
-
-            <div class="priority-buttons">
-                <button class="priority-btn priority-urgent" data-priority="1">🚨 URGENT</button>
-                <button class="priority-btn priority-high" data-priority="2">⚡ HIGH</button>
-                <button class="priority-btn priority-normal active" data-priority="3">✅ NORMAL</button>
-                <button class="priority-btn priority-low" data-priority="4">💤 LOW</button>
-                <button class="priority-btn" data-priority="" style="background: linear-gradient(135deg, #6c5ce7, #a29bfe);">🤖 AUTO</button>
-            </div>
-
-            <div class="message-input-section">
-                <input type="text" id="messageInput" placeholder="Type your message here..." maxlength="2000">
-                <button id="sendBtn">Send</button>
-            </div>
-        </div>
+    <div class="header">
+        <h1>🚨 Priority Chat System</h1>
+        <p>Messages are automatically prioritized! Urgent messages appear first.</p>
     </div>
+    
+    <div id="status" class="disconnected">Status: Disconnected</div>
 
-    <!-- Beautiful Login Modal -->
-    <div id="loginModal">
-        <div class="floating-shapes">
-            <div class="shape" style="width: 80px; height: 80px; background: rgba(255,255,255,0.1); border-radius: 50%;"></div>
-            <div class="shape" style="width: 120px; height: 120px; background: rgba(255,255,255,0.05); border-radius: 20px;"></div>
-            <div class="shape" style="width: 60px; height: 60px; background: rgba(255,255,255,0.1); border-radius: 10px;"></div>
+    <!-- ✅ New stats panel -->
+    <div id="statsPanel">
+        <strong>📊 Queue Stats:</strong><br>
+        Batch Queue: <span id="batchSize">0</span><br>
+        Retry Queue: <span id="retrySize">0</span><br>
+        Session Queue: <span id="sessionSize">0</span>
+    </div>
+    
+    <div id="messages"></div>
+    
+    <div class="input-section">
+        <div class="auto-priority-info" style="background-color:#e3f2fd;padding:10px;border-radius:5px;margin-bottom:15px;font-size:12px;">
+            <strong>🤖 Auto-Priority Detection:</strong> 
+            Messages with words like "urgent", "help", "emergency" get higher priority. 
+            You can also set manual priority below.
         </div>
         
-        <div id="loginBox">
-            <h1 class="login-title">Welcome</h1>
-            <p class="login-subtitle">Please sign in to join the priority chat system</p>
-            
-            <div class="input-group">
-                <input type="text" id="loginUsername" placeholder=" " required>
-                <label for="loginUsername">Your Name</label>
-            </div>
-            
-            <div class="input-group">
-                <input type="password" id="loginSecret" placeholder=" " required>
-                <label for="loginSecret">Secret Key</label>
-            </div>
-            
-            <button id="loginBtn">Sign In</button>
-            <div id="loginError"></div>
+        <div class="user-input">
+            <input type="text" id="userInput" placeholder="Enter your name..." value="Anonymous">
         </div>
+        
+        <div class="priority-section">
+            <span><strong>Priority:</strong></span>
+            <div class="priority-buttons">
+                <button class="priority-btn priority-urgent" onclick="setPriority(1)">🚨 URGENT</button>
+                <button class="priority-btn priority-high" onclick="setPriority(2)">⚡ HIGH</button>
+                <button class="priority-btn priority-normal active" onclick="setPriority(3)">✅ NORMAL</button>
+                <button class="priority-btn priority-low" onclick="setPriority(4)">💤 LOW</button>
+                <button class="priority-btn" style="background-color: #607d8b;" onclick="setPriority(null)">🤖 AUTO</button>
+            </div>
+        </div>
+        
+        <div class="message-input-section">
+            <input type="text" id="messageInput" placeholder="Type your message here..." maxlength="2000" required>
+            <button id="sendBtn">Send</button>
+        </div>
+    </div>
+    
+    <div style="margin-top: 20px; padding: 15px; background-color: white; border-radius: 8px; font-size: 12px;">
+        <strong>🔍 Try these examples:</strong><br>
+        • "This is urgent!" (auto-detected as URGENT)<br>
+        • "Important meeting at 3pm" (auto-detected as HIGH)<br>
+        • "Hello everyone" (NORMAL priority)<br>
+        • Type in ALL CAPS (auto-detected as HIGH)<br>
+        • Use @username (auto-detected as HIGH)
     </div>
 
     <script>
-        let currentUser = null;
-        let selectedPriority = 3; // Default to normal
+        console.log('🔄 Starting Priority Chat System...');
+        
+        let currentUser = 'Anonymous';
+        let selectedPriority = null;
+        let allMessages = [];
 
-        const socket = io('', {
-            query: { code: 'your_access_code_here' }
-        });
+        const socket = io();
         const messages = document.getElementById('messages');
         const messageInput = document.getElementById('messageInput');
-        const chatContainer = document.getElementById('chatContainer');
+        const userInput = document.getElementById('userInput');
         const status = document.getElementById('status');
-        const loginModal = document.getElementById('loginModal');
-        const loginBtn = document.getElementById('loginBtn');
-        const loginUsername = document.getElementById('loginUsername');
-        const loginSecret = document.getElementById('loginSecret');
-        const loginError = document.getElementById('loginError');
         const sendBtn = document.getElementById('sendBtn');
-        const userInfo = document.getElementById('userInfo');
-        const userName = document.getElementById('userName');
-        const userAvatar = document.getElementById('userAvatar');
 
-        socket.on('connect', () => { 
-            status.textContent='Status: Connected ✅'; 
-            status.className='connected'; 
-        });
-        
-        socket.on('disconnect', () => { 
-            status.textContent='Status: Disconnected ❌'; 
-            status.className='disconnected'; 
+        // ✅ Queue stats panel elements
+        const batchSizeEl = document.getElementById('batchSize');
+        const retrySizeEl = document.getElementById('retrySize');
+        const sessionSizeEl = document.getElementById('sessionSize');
+
+        socket.on('connect', function() {
+            status.textContent = 'Status: Connected ✅ Priority System Active!';
+            status.className = 'connected';
+            socket.emit('get_stats'); // auto request stats on connect
         });
 
-        socket.on('login_success', (data) => {
-            currentUser = data.username;
-            
-            // Update user info display
-            userName.textContent = currentUser;
-            userAvatar.textContent = currentUser.charAt(0).toUpperCase();
-            userInfo.style.display = 'flex';
-            
-            // Hide login modal and show chat
-            loginModal.style.display = 'none';
-            chatContainer.style.display = 'block';
-            
-            // Focus on message input
-            messageInput.focus();
+        socket.on('disconnect', function() {
+            status.textContent = 'Status: Disconnected ❌';
+            status.className = 'disconnected';
         });
 
-        socket.on('login_error', (msg) => {
-            loginError.textContent = msg;
-            loginError.style.display = 'block';
+        // ✅ Update stats when received
+        socket.on('queue_stats', function(stats) {
+            console.log('📊 Queue stats:', stats);
+            batchSizeEl.textContent = stats.batch_queue_size ?? 0;
+            retrySizeEl.textContent = stats.retry_queue_size ?? 0;
+            sessionSizeEl.textContent = stats.session_queue_size ?? 0;
+            // 🔄 Auto-refresh queue stats every 5 seconds
+            setInterval(() => {
+                socket.emit('get_stats');
+            }, 5000);
         });
 
-        socket.on('new_message', (msg) => {
-            const div = document.createElement('div');
-            div.className = `message ${msg.priority_name ? msg.priority_name.toLowerCase() : 'normal'}`;
-            
-            const header = document.createElement('div');
-            header.className = 'message-header';
-            
-            const userSpan = document.createElement('span'); 
-            userSpan.className='message-user'; 
-            userSpan.textContent = msg.user;
-            
-            const prioritySpan = document.createElement('span'); 
-            prioritySpan.className = `message-priority priority-${msg.priority_name ? msg.priority_name.toLowerCase() : 'normal'}`; 
-            prioritySpan.textContent = msg.priority_name || 'NORMAL';
-            
-            header.appendChild(userSpan); 
-            header.appendChild(prioritySpan);
-            
-            const textDiv = document.createElement('div'); 
-            textDiv.className = 'message-text';
-            textDiv.innerHTML = msg.is_spam ? `<span class="spam-word">🚨 SPAM:</span> ${msg.text}` : msg.text;
-            
-            if(msg.is_spam && msg.alert_message) {
-                const alertSpan = document.createElement('span'); 
-                alertSpan.className = 'spam-alert'; 
-                alertSpan.textContent = msg.alert_message;
-                div.appendChild(alertSpan);
+        // 🖼 Rendering logic
+        function renderMessages() {
+            allMessages.sort((a, b) => a.priority === b.priority ? a.timestamp - b.timestamp : a.priority - b.priority);
+            messages.innerHTML = '';
+            const grouped = {1:[],2:[],3:[],4:[]};
+            allMessages.forEach(m => grouped[m.priority].push(m));
+            const names={1:"URGENT",2:"HIGH",3:"NORMAL",4:"LOW"};
+            const emojis={1:"🚨",2:"⚡",3:"✅",4:"💤"};
+            for (let p=1;p<=4;p++){
+                if(grouped[p].length){
+                    const sep=document.createElement('div');
+                    sep.className="priority-separator";
+                    sep.textContent=`${emojis[p]} ${names[p]} PRIORITY (${grouped[p].length} messages)`;
+                    messages.appendChild(sep);
+                    grouped[p].forEach(msg=>{
+                        const div=document.createElement('div');
+                        div.className=`message ${msg.priority_name.toLowerCase()}`;
+                        div.innerHTML=`<div class="message-header">
+                          <span class="message-user">${msg.user}</span>
+                          <span class="message-priority priority-${msg.priority_name.toLowerCase()}">${msg.priority_name}</span>
+                        </div>
+                        <div class="message-text">${msg.text}</div>`;
+                        messages.appendChild(div);
+                    });
+                }
             }
-            
-            div.appendChild(header); 
-            div.appendChild(textDiv); 
-            messages.appendChild(div);
             messages.scrollTop = messages.scrollHeight;
+        }
+
+        // ✅ Single message
+        socket.on('new_message', function(data) {
+            console.log('📨 Received priority message:', data);
+            allMessages.push(data);
+            renderMessages();
+        });
+
+        // ✅ Batch messages
+        socket.on('new_message_batch', function(batch) {
+            console.log(`📦 Received batch of ${batch.length} messages`);
+            const batchDiv = document.createElement('div');
+            batchDiv.className="batch-separator";
+            batchDiv.textContent=`🚀 Delivered ${batch.length} messages in a batch`;
+            messages.appendChild(batchDiv);
+            allMessages.push(...batch);
+            renderMessages();
         });
 
         function sendMessage() {
             const message = messageInput.value.trim();
-            if(!message || !currentUser) return;
-            
-            socket.emit('send_message', { message, priority: selectedPriority });
-            messageInput.value = '';
-        }
-
-        sendBtn.addEventListener('click', sendMessage);
-        messageInput.addEventListener('keypress', (e) => { 
-            if(e.key === 'Enter') sendMessage(); 
-        });
-
-        document.querySelectorAll('.priority-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                selectedPriority = btn.dataset.priority ? parseInt(btn.dataset.priority) : null;
-                document.querySelectorAll('.priority-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-            });
-        });
-
-        loginBtn.addEventListener('click', () => {
-            const username = loginUsername.value.trim();
-            const secret = loginSecret.value.trim();
-            
-            loginError.style.display = 'none';
-            
-            if(!username || !secret) { 
-                loginError.textContent = 'Please enter both your name and secret key'; 
-                loginError.style.display = 'block';
-                return; 
+            const user = userInput.value.trim() || 'Anonymous';
+            if (message) {
+                socket.emit('send_message', {message, user, priority: selectedPriority});
+                messageInput.value='';
+                currentUser=user;
             }
-            
-            socket.emit('login', { username, secretKey: secret });
-        });
-
-        // Handle Enter key in login inputs
-        [loginUsername, loginSecret].forEach(input => {
-            input.addEventListener('keypress', (e) => {
-                if(e.key === 'Enter') {
-                    loginBtn.click();
-                }
-            });
-        });
-
-        // Auto-focus username field when page loads
-        window.addEventListener('load', () => {
-            loginUsername.focus();
-        });
-        
-
-        // Test spam detection display (remove this after testing)
-        function testSpamDisplay() {
-            const testSpamMessage = {
-                user: "TestUser",
-                text: "BUY NOW! FREE MONEY! CLICK HERE!",
-                priority: 4,
-                priority_name: "LOW",
-                is_spam: true,
-                alert_message: "DETECTED"
-            };
-            
-            // Simulate receiving a spam message
-            socket.emit = socket.emit || (() => {}); // Prevent errors if not connected
-            
-            // Manually trigger the spam display
-            const event = new CustomEvent('test_spam');
-            event.data = testSpamMessage;
-            
-            // You can call this in browser console: testSpamDisplay()
-            console.log('Test spam message created - check if styling works');
         }
-        
-        // Make function available in console for testing
-        window.testSpamDisplay = testSpamDisplay;
+        sendBtn.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', e => { if(e.key==='Enter') sendMessage(); });
+        userInput.addEventListener('change', ()=>{ currentUser=userInput.value.trim()||'Anonymous'; });
+
+        function setPriority(priority) {
+            selectedPriority = priority;
+            document.querySelectorAll('.priority-btn').forEach(btn=>btn.classList.remove('active'));
+            const map={1:"🚨 URGENT",2:"⚡ HIGH",3:"✅ NORMAL",4:"💤 LOW",null:"🤖 AUTO"};
+            document.querySelectorAll('.priority-btn').forEach(btn=>{
+                if(btn.textContent===map[priority]) btn.classList.add('active');
+            });
+        }
     </script>
 </body>
 </html>
