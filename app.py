@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 import os
 import re
 from datetime import datetime
+from collections import defaultdict, deque
 
 # Load environment variables
 load_dotenv()
@@ -79,6 +80,122 @@ class SpamDetector:
         
         return False
 
+class PriorityMessageQueue:
+    """Priority-based message queue system"""
+    
+    def __init__(self, max_messages_per_category=50):
+        self.max_messages_per_category = max_messages_per_category
+        
+        # Separate queues for each priority level
+        self.queues = {
+            1: deque(maxlen=max_messages_per_category),  # URGENT
+            2: deque(maxlen=max_messages_per_category),  # HIGH  
+            3: deque(maxlen=max_messages_per_category),  # NORMAL
+            4: deque(maxlen=max_messages_per_category)   # LOW/SPAM
+        }
+        
+        # Priority names mapping
+        self.priority_names = {
+            1: "URGENT",
+            2: "HIGH", 
+            3: "NORMAL",
+            4: "LOW"
+        }
+        
+        # Message counter for unique IDs
+        self.message_counter = 0
+    
+    def add_message(self, message_data):
+        """Add message to appropriate priority queue"""
+        priority = message_data.get("priority", 3)
+        
+        # Add unique message ID
+        self.message_counter += 1
+        message_data["id"] = self.message_counter
+        
+        # Add to appropriate queue
+        self.queues[priority].append(message_data)
+        
+        print(f"📝 Added message to {self.priority_names[priority]} queue: '{message_data['text'][:30]}...'")
+        
+        return message_data
+    
+    def get_all_messages_organized(self):
+        """Get all messages organized by priority"""
+        organized_messages = {
+            "urgent": list(self.queues[1]),
+            "high": list(self.queues[2]), 
+            "normal": list(self.queues[3]),
+            "low": list(self.queues[4])
+        }
+        
+        return organized_messages
+    
+    def get_queue_stats(self):
+        """Get statistics about message queues"""
+        return {
+            "urgent_count": len(self.queues[1]),
+            "high_count": len(self.queues[2]),
+            "normal_count": len(self.queues[3]),
+            "low_count": len(self.queues[4]),
+            "total_messages": sum(len(queue) for queue in self.queues.values())
+        }
+
+def detect_message_priority(message: str, manual_priority: int = None) -> int:
+    """
+    Auto-detect message priority based on content analysis
+    
+    Args:
+        message: The message text to analyze
+        manual_priority: Manual priority override (1-4)
+        
+    Returns:
+        Priority level (1=URGENT, 2=HIGH, 3=NORMAL, 4=LOW)
+    """
+    # If manual priority is set and valid, use it
+    if manual_priority is not None and manual_priority in [1, 2, 3, 4]:
+        return manual_priority
+    
+    if not message:
+        return 3  # NORMAL
+    
+    message_lower = message.lower()
+    
+    # URGENT priority keywords
+    urgent_keywords = [
+        'urgent', 'emergency', 'asap', 'immediately', 'critical',
+        'help', 'issue', 'problem', 'error', 'bug', 'down',
+        'broken', 'failed', 'crash', 'alert'
+    ]
+    
+    # HIGH priority keywords  
+    high_keywords = [
+        'important', 'priority', 'deadline', 'meeting', 'review',
+        'approval', 'decision', 'update', 'status', 'progress'
+    ]
+    
+    # Check for ALL CAPS (indicates urgency/emphasis)
+    caps_ratio = sum(1 for c in message if c.isupper()) / len(message) if message else 0
+    if caps_ratio > 0.7 and len(message) > 10:  # More than 70% caps and reasonably long
+        return 1  # URGENT
+    
+    # Check for @mentions (indicates direct communication)
+    if '@' in message:
+        return 2  # HIGH
+    
+    # Check for urgent keywords
+    for keyword in urgent_keywords:
+        if keyword in message_lower:
+            return 1  # URGENT
+    
+    # Check for high priority keywords
+    for keyword in high_keywords:
+        if keyword in message_lower:
+            return 2  # HIGH
+    
+    # Default priority
+    return 3  # NORMAL
+
 def create_app():
     """Application factory pattern"""
     app = Flask(__name__)
@@ -103,8 +220,9 @@ def create_socketio(app):
 app = create_app()
 socketio = create_socketio(app)
 
-# Initialize spam detector
+# Initialize components
 spam_detector = SpamDetector()
+message_queue = PriorityMessageQueue()
 
 # Get access code from environment
 ACCESS_CODE = os.getenv("CHAT_ACCESS_CODE", "supersecret123")
@@ -115,6 +233,10 @@ connected_users = {}  # session_id -> username
 @socketio.on("connect")
 def handle_connect():
     print(f"Client connected: {request.sid}")
+    
+    # Send current message organization to new client
+    organized_messages = message_queue.get_all_messages_organized()
+    emit("message_organization", organized_messages)
 
 @socketio.on("disconnect")
 def handle_disconnect():
@@ -151,17 +273,25 @@ def handle_login(data):
         emit("login_success", {"username": username})
         print(f"User '{username}' logged in successfully")
         
+        # Send current message organization to logged in user
+        organized_messages = message_queue.get_all_messages_organized()
+        emit("message_organization", organized_messages)
+        
         # Send welcome message
-        welcome_msg = {
-            "user": "System",
-            "text": f"Welcome {username}!",
-            "priority": 3,
-            "priority_name": "NORMAL",
-            "is_spam": False,
-            "alert_message": None,
-            "timestamp": datetime.now().isoformat()
-        }
-        emit("new_message", welcome_msg)
+        #welcome_msg = {
+           # "user": "System",
+            #"text": f"Welcome {username}! Messages are organized by priority.",
+           # "priority": 3,
+           # "priority_name": "NORMAL",
+           # "is_spam": False,
+            #"alert_message": None,
+            #"timestamp": datetime.now().isoformat()
+        #}
+        
+        # Add welcome message to queue and broadcast organization
+        message_queue.add_message(welcome_msg)
+        organized_messages = message_queue.get_all_messages_organized()
+        emit("message_organization", organized_messages, broadcast=True)
         
     except Exception as e:
         print(f"Login error: {e}")
@@ -169,7 +299,7 @@ def handle_login(data):
 
 @socketio.on("send_message")
 def handle_message(data):
-    """Handle incoming messages with spam detection"""
+    """Handle incoming messages with priority detection and spam checking"""
     try:
         if request.sid not in connected_users:
             print(f"Message from unauthorized user: {request.sid}")
@@ -177,20 +307,23 @@ def handle_message(data):
         
         user = connected_users[request.sid]
         message = data.get("message", "").strip()
-        priority = data.get("priority", 3)
+        manual_priority = data.get("priority")  # Manual priority from user
         
         if not message:
             return
         
         print(f"Message from '{user}': '{message}'")
         
-        # Convert priority to int
+        # Convert manual priority to int if provided
         try:
-            priority = int(priority) if priority is not None else 3
-            if priority not in [1, 2, 3, 4]:
-                priority = 3
+            manual_priority = int(manual_priority) if manual_priority is not None else None
+            if manual_priority is not None and manual_priority not in [1, 2, 3, 4]:
+                manual_priority = None
         except (ValueError, TypeError):
-            priority = 3
+            manual_priority = None
+        
+        # Auto-detect priority (with manual override support)
+        priority = detect_message_priority(message, manual_priority)
         
         # Check for spam
         is_spam = spam_detector.is_spam(message)
@@ -198,7 +331,7 @@ def handle_message(data):
         # If spam detected, force priority to 4 (LOW)
         if is_spam:
             priority = 4
-            alert_message = "DETECTED"
+            alert_message = "SPAM DETECTED"
             print(f"SPAM MESSAGE from '{user}': '{message}'")
         else:
             alert_message = None
@@ -221,12 +354,23 @@ def handle_message(data):
             "timestamp": datetime.now().isoformat()
         }
         
-        # Broadcast to all connected clients
-        emit("new_message", msg_data, broadcast=True)
-        print(f"Broadcasted message: Priority={priority_names.get(priority)}, Spam={is_spam}")
+        # Add message to priority queue
+        message_queue.add_message(msg_data)
+        
+        # Get organized messages and broadcast to all clients
+        organized_messages = message_queue.get_all_messages_organized()
+        emit("message_organization", organized_messages, broadcast=True)
+        
+        print(f"📤 Broadcasted organized messages: Priority={priority_names.get(priority)}, Spam={is_spam}")
         
     except Exception as e:
         print(f"Message handling error: {e}")
+
+@socketio.on("request_messages")
+def handle_request_messages():
+    """Send current message organization to requesting client"""
+    organized_messages = message_queue.get_all_messages_organized()
+    emit("message_organization", organized_messages)
 
 @app.route('/')
 def index():
@@ -236,39 +380,57 @@ def index():
 @app.route('/health')
 def health_check():
     """Health check endpoint"""
+    queue_stats = message_queue.get_queue_stats()
     return {
         'status': 'healthy',
         'system': 'Priority Chat System',
         'version': '1.0.0',
-        'connected_users': len(connected_users)
+        'connected_users': len(connected_users),
+        'queue_stats': queue_stats
     }
 
 @app.route('/stats')
 def get_stats():
     """Get system statistics"""
+    queue_stats = message_queue.get_queue_stats()
     return {
         'connected_users': len(connected_users),
         'access_code_configured': bool(ACCESS_CODE),
         'spam_detection': 'active',
+        'message_queues': queue_stats,
         'uptime': 'running'
     }
+
+@app.route('/messages')
+def get_messages():
+    """API endpoint to get organized messages"""
+    organized_messages = message_queue.get_all_messages_organized()
+    return organized_messages
 
 def main():
     """Main application entry point"""
     print("=" * 50)
-    print("Priority Chat System Starting...")
+    print("🚀 Priority Queue Chat System Starting...")
     print("=" * 50)
-    print("Main Interface: http://localhost:5000")
-    print("Health Check:   http://localhost:5000/health")
-    print("Statistics:     http://localhost:5000/stats")
+    print("📍 Main Interface: http://localhost:5000")
+    print("📊 Health Check:  http://localhost:5000/health")
+    print("📈 Statistics:    http://localhost:5000/stats")
+    print("💬 Messages API:  http://localhost:5000/messages")
     print("=" * 50)
-    print("Features:")
-    print("  ✅ Auto-priority detection")
-    print("  ✅ Spam detection and filtering")
-    print("  ✅ Real-time messaging")
-    print("  ✅ Secret key authentication")
+    print("🎯 Priority Queue Features:")
+    print("  🔴 URGENT Messages   (Top Priority)")
+    print("  🟡 HIGH Messages     (Second Priority)")
+    print("  🟢 NORMAL Messages   (Third Priority)")
+    print("  ⚫ LOW/SPAM Messages (Bottom Priority)")
     print("=" * 50)
-    print(f"Access Code: {ACCESS_CODE}")
+    print("✨ Auto-Detection:")
+    print("  ✅ Keywords: 'urgent', 'emergency', 'help', 'error', etc.")
+    print("  ✅ ALL CAPS messages (>70% capitals)")
+    print("  ✅ @mentions for HIGH priority")
+    print("  ✅ Spam detection forces LOW priority")
+    print("  ✅ Manual priority override available")
+    print("=" * 50)
+    print(f"🔑 Access Code: {ACCESS_CODE}")
     print("=" * 50)
     
     try:
@@ -280,9 +442,9 @@ def main():
             allow_unsafe_werkzeug=True
         )
     except KeyboardInterrupt:
-        print("\nChat system shutting down...")
+        print("\n👋 Priority Chat system shutting down...")
     except Exception as e:
-        print(f"Fatal error: {str(e)}")
+        print(f"🚨 Fatal error: {str(e)}")
 
 if __name__ == '__main__':
     main()
