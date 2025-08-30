@@ -13,6 +13,7 @@ from datetime import datetime
 
 # Load environment variables
 load_dotenv()
+#test
 
 class SpamDetector:
     """Spam detection for chat messages"""
