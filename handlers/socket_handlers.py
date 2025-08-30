@@ -3,6 +3,12 @@ from flask import request
 from utils.message_utils import validate_message, validate_username, format_message_for_client
 from utils.spam_utils import SpamDetector
 from typing import Dict
+from dotenv import load_dotenv
+import os
+
+# Load environment variables
+load_dotenv()
+
 
 class ChatSocketHandlers:
     """
@@ -45,20 +51,17 @@ class ChatSocketHandlers:
             return self.on_error(e)
 
     def on_connect(self):
-        """Handle new user connection"""
+        """Handle new connection with access code auth"""
         user_id = request.sid
+        access_code = request.args.get("code")  # query param from client
+
+        if access_code != os.getenv("CHAT_ACCESS_CODE"):
+            print(f"❌ Unauthorized connection attempt: {user_id}")
+            emit("error", {"type": "auth_error", "message": "Invalid access code"})
+            return False  # reject connection
+
         self.connected_users[user_id] = {"spam_count": 0, "username": None}
-        print(f'✅ New user connected: {user_id}')
-
-        # Send message history to new user
-        history = self.message_system.history.get_all()
-        for msg in history:
-            formatted_msg = format_message_for_client(msg)
-            emit('new_message', formatted_msg)
-
-        # Send queue statistics
-        stats = self.message_system.get_queue_stats()
-        emit('queue_stats', stats)
+        print(f"✅ Authorized user connected: {user_id}")
 
         return True
 
@@ -181,7 +184,7 @@ class ChatSocketHandlers:
             effective_priority = 4 if is_spam else priority
 
             system_msg = self.message_system.add_message(
-                message, "SYSTEM", manual_priority=effective_priority
+                message, "SYSTEM", effective_priority
             )
 
             next_message = self.message_system.get_next_message()
