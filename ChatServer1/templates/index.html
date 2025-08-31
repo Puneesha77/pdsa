@@ -1,0 +1,1294 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Priority Chat System with Offline Queue 🚨</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        if (typeof io === 'undefined') {
+            document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"><\/script>');
+        }
+    </script>
+
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px;
+            font-size: 13px;
+        }
+
+        .chat-container {
+            max-width: 1400px;
+            width: 100%;
+            background-color: white;
+            border-radius: 15px;
+            box-shadow: 0 15px 30px rgba(0,0,0,0.1);
+            overflow: hidden;
+            display: none;
+        }
+
+        .header { 
+            text-align: center; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            color: white; 
+            padding: 15px; 
+        }
+        
+        .header h1 { font-size: 1.4em; margin-bottom: 5px; font-weight: 300; }
+        .header p { opacity: 0.9; font-size: 0.85em; }
+
+        .main-content {
+            display: flex;
+            height: 1000px;
+        }
+
+        .chat-section {
+            flex: 2;
+            padding: 15px;
+            border-right: 1px solid #eee;
+        }
+
+        .stats-section {
+            flex: 1;
+            padding: 15px;
+            background: #f8f9fa;
+            overflow-y: auto;
+        }
+
+        /* NEW: Offline notification styling */
+        .offline-notification {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            text-align: center;
+            font-size: 11px;
+            font-weight: 600;
+            box-shadow: 0 3px 8px rgba(79, 172, 254, 0.3);
+            animation: slideDown 0.3s ease;
+        }
+
+        @keyframes slideDown {
+            from { transform: translateY(-20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        .offline-preview {
+            background: #f8f9fd;
+            border-left: 4px solid #4facfe;
+            padding: 8px 12px;
+            margin: 8px 0;
+            border-radius: 6px;
+            font-size: 10px;
+        }
+
+        .offline-preview-message {
+            margin: 4px 0;
+            padding: 4px 8px;
+            background: white;
+            border-radius: 4px;
+            border-left: 2px solid #4facfe;
+        }
+
+        /* Queue Statistics Styling */
+        .stats-panel {
+            margin-bottom: 20px;
+            background: white;
+            border-radius: 10px;
+            padding: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .stats-title {
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 8px;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 4px;
+            font-size: 11px;
+        }
+
+        .stat-label {
+            color: #666;
+        }
+
+        .stat-value {
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .batch-indicator {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: 600;
+            text-align: center;
+            margin: 4px 0;
+        }
+
+        .batch-processing { background: #e3f2fd; color: #1976d2; }
+        .batch-sent { background: #e8f5e8; color: #388e3c; }
+        .retry-active { background: #fff3e0; color: #f57c00; }
+        .retry-failed { background: #ffebee; color: #d32f2f; }
+        .offline-active { background: #e3f2fd; color: #1976d2; } /* NEW */
+        .offline-delivering { background: #e8f5e8; color: #388e3c; } /* NEW */
+
+        /* Existing styles from your original HTML */
+        .message-categories {
+            display: none;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .message-categories.has-messages {
+            display: flex;
+        }
+
+        .priority-category {
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            overflow: hidden;
+            border: 1px solid rgba(0,0,0,0.05);
+            transition: all 0.3s ease;
+        }
+
+        .priority-category:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+        }
+
+        .priority-category.has-messages {
+            display: block;
+        }
+
+        .priority-category.empty {
+            display: none;
+        }
+
+        .category-header {
+            padding: 10px 15px;
+            color: white;
+            font-weight: 700;
+            text-align: center;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
+        }
+
+        .urgent-category .category-header {
+            background: linear-gradient(135deg, #ff4757 0%, #ff3838 100%);
+        }
+
+        .high-category .category-header {
+            background: linear-gradient(135deg, #ffa502 0%, #ff6348 100%);
+        }
+
+        .normal-category .category-header {
+            background: linear-gradient(135deg, #2ed573 0%, #1e90ff 100%);
+        }
+
+        .low-category .category-header {
+            background: linear-gradient(135deg, #a55eea 0%, #778beb 100%);
+        }
+
+        .category-messages {
+            padding: 10px 12px;
+            background: linear-gradient(135deg, #f8f9fd 0%, #ffffff 100%);
+            min-height: 60px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        .category-messages::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .category-messages::-webkit-scrollbar-track {
+            background: rgba(0,0,0,0.05);
+            border-radius: 6px;
+        }
+
+        .category-messages::-webkit-scrollbar-thumb {
+            background: linear-gradient(135deg, #ccc, #999);
+            border-radius: 6px;
+        }
+
+        .message { 
+            margin: 6px 0; 
+            padding: 8px 10px; 
+            border-radius: 8px; 
+            background: white; 
+            position: relative; 
+            box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+            border-left: 3px solid;
+            animation: messageSlide 0.3s ease;
+            transition: all 0.3s ease;
+            font-size: 11px;
+        }
+
+        .message:hover {
+            transform: translateX(2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        /* NEW: Offline message styling */
+        .message.offline-message {
+            border: 2px dashed #4facfe !important;
+            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%) !important;
+        }
+
+        .message.offline-message .offline-badge {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            background: #4facfe;
+            color: white;
+            padding: 2px 6px;
+            font-size: 8px;
+            font-weight: 900;
+            border-radius: 10px;
+        }
+
+        @keyframes messageSlide {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+        
+        .message.urgent { 
+            border-left-color: #ff4757;
+            background: linear-gradient(135deg, #fff5f5 0%, #ffe8e8 100%);
+        }
+        .message.high { 
+            border-left-color: #ffa502;
+            background: linear-gradient(135deg, #fff8f0 0%, #ffe4cc 100%);
+        }
+        .message.normal { 
+            border-left-color: #2ed573;
+            background: linear-gradient(135deg, #f0fff4 0%, #e8f8ed 100%);
+        }
+        .message.low { 
+            border-left-color: #a55eea;
+            background: linear-gradient(135deg, #f8f4ff 0%, #ede4ff 100%);
+        }
+        
+        .message.spam-message {
+            border: 2px solid #ff3838 !important;
+            background: linear-gradient(135deg, #fff5f5 0%, #ffeaea 100%) !important;
+        }
+
+        .message.spam-message .spam-alert { 
+            position: absolute; 
+            top: 4px; 
+            right: 4px; 
+            background: #ff3838;
+            color: white; 
+            padding: 2px 6px; 
+            font-size: 8px; 
+            font-weight: 900; 
+            border-radius: 10px;
+        }
+        
+        .message-header { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            margin-bottom: 4px; 
+        }
+        .message-user { 
+            font-weight: 700; 
+            color: #2c3e50; 
+            font-size: 10px;
+            background: rgba(0,0,0,0.05);
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+        .message-time {
+            font-size: 8px;
+            color: #7f8c8d;
+            opacity: 0.8;
+        }
+        .message-text { 
+            margin-top: 2px; 
+            line-height: 1.4; 
+            color: #2c3e50; 
+            font-size: 11px;
+        }
+
+        .empty-category {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #95a5a6;
+            font-style: italic;
+            font-size: 10px;
+            flex-direction: column;
+            gap: 5px;
+            padding: 15px 0;
+        }
+        
+        .priority-buttons { 
+            display: flex; 
+            gap: 6px; 
+            margin-bottom: 15px; 
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        
+        .priority-btn { 
+            padding: 6px 12px; 
+            border: none; 
+            border-radius: 15px; 
+            cursor: pointer; 
+            font-size: 9px; 
+            font-weight: 700; 
+            color: white; 
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
+        }
+        
+        .priority-btn:hover { 
+            transform: translateY(-1px); 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2); 
+        }
+        .priority-btn.active { 
+            transform: translateY(-1px) scale(1.05); 
+            box-shadow: 0 0 0 2px rgba(255,255,255,0.6), 0 4px 12px rgba(0,0,0,0.2); 
+        }
+
+        .priority-urgent { background: linear-gradient(135deg, #ff4757 0%, #ff3838 100%); }
+        .priority-high { background: linear-gradient(135deg, #ffa502 0%, #ff6348 100%); }
+        .priority-normal { background: linear-gradient(135deg, #2ed573 0%, #1e90ff 100%); }
+        .priority-low { background: linear-gradient(135deg, #a55eea 0%, #778beb 100%); }
+        
+        .message-input-section { 
+            display: flex; 
+            gap: 8px; 
+            align-items: center;
+        }
+        
+        #messageInput { 
+            flex: 1; 
+            padding: 10px 15px; 
+            border: 2px solid #e0e6ed; 
+            border-radius: 15px; 
+            font-size: 11px; 
+            transition: all 0.3s ease;
+            outline: none;
+            background: #f8f9fa;
+        }
+        
+        #messageInput:focus { 
+            border-color: #667eea; 
+            background: white;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        #sendBtn { 
+            padding: 10px 16px; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            color: white; 
+            border: none; 
+            border-radius: 15px; 
+            cursor: pointer; 
+            font-weight: 700; 
+            font-size: 10px;
+            transition: all 0.3s ease;
+            box-shadow: 0 3px 8px rgba(102, 126, 234, 0.3);
+            text-transform: uppercase;
+        }
+        
+        #sendBtn:hover { 
+            transform: translateY(-1px); 
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4); 
+        }
+        
+        #status { 
+            margin: 8px 0; 
+            font-weight: 600; 
+            text-align: center; 
+            padding: 8px; 
+            border-radius: 15px; 
+            font-size: 10px;
+        }
+        
+        .connected { 
+            color: #2ed573; 
+            background: linear-gradient(135deg, #f0fff4 0%, #e8f8ed 100%);
+            border: 2px solid #2ed573;
+        }
+        .disconnected { 
+            color: #ff4757; 
+            background: linear-gradient(135deg, #fff5f5 0%, #ffe8e8 100%);
+            border: 2px solid #ff4757;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            padding: 10px 12px;
+            background: linear-gradient(135deg, #f8f9fd 0%, #ffffff 100%);
+            border-radius: 10px;
+            border-left: 4px solid #667eea;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+            position: relative;
+        }
+
+        .logout-btn {
+            position: absolute;
+            right: 12px;
+            padding: 4px 8px;
+            background: linear-gradient(135deg, #ff4757 0%, #ff3838 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 8px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+        }
+
+        .logout-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 3px 8px rgba(255, 71, 87, 0.4);
+        }
+
+        .user-avatar {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 700;
+            font-size: 12px;
+            box-shadow: 0 2px 6px rgba(102, 126, 234, 0.3);
+        }
+
+        .user-details h3 {
+            margin: 0;
+            color: #2c3e50;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .user-details p {
+            margin: 1px 0 0 0;
+            color: #7f8c8d;
+            font-size: 9px;
+        }
+
+        .message-count {
+            background: rgba(255,255,255,0.9);
+            color: #333;
+            padding: 2px 6px;
+            border-radius: 8px;
+            font-size: 9px;
+            font-weight: 700;
+            margin-left: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+        }
+
+        /* Login Modal */
+        #loginModal { 
+            display: flex; 
+            position: fixed; 
+            z-index: 999; 
+            left: 0; 
+            top: 0; 
+            width: 100%; 
+            height: 100%; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            justify-content: center; 
+            align-items: center; 
+        }
+
+        #loginBox { 
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            padding: 30px 25px;
+            border-radius: 15px;
+            max-width: 320px;
+            width: 90%;
+            text-align: center;
+            box-shadow: 0 15px 30px rgba(0,0,0,0.2);
+        }
+
+        .login-title {
+            font-size: 1.6em;
+            margin-bottom: 6px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: 700;
+        }
+
+        .login-subtitle {
+            color: #666;
+            margin-bottom: 20px;
+            font-size: 11px;
+        }
+
+        .input-group {
+            position: relative;
+            margin-bottom: 15px;
+        }
+
+        .input-group input {
+            width: 100%;
+            padding: 10px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 11px;
+            transition: all 0.3s ease;
+            background: rgba(255,255,255,0.9);
+            outline: none;
+        }
+
+        .input-group input:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+        }
+
+        .input-group label {
+            position: absolute;
+            left: 15px;
+            top: 10px;
+            color: #999;
+            transition: all 0.3s ease;
+            pointer-events: none;
+            background: rgba(255,255,255,0.9);
+            padding: 0 4px;
+            font-size: 11px;
+        }
+
+        .input-group input:focus + label,
+        .input-group input:not(:placeholder-shown) + label {
+            top: -6px;
+            left: 12px;
+            font-size: 9px;
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        #loginBtn {
+            width: 100%;
+            padding: 10px;
+            border: none;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+            margin-top: 5px;
+        }
+
+        #loginBtn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 18px rgba(102, 126, 234, 0.4);
+        }
+
+        #loginError {
+            color: #f44336;
+            font-weight: 600;
+            margin-top: 10px;
+            padding: 6px;
+            background: rgba(244, 67, 54, 0.1);
+            border-radius: 6px;
+            font-size: 10px;
+        }
+
+        @media (max-width: 768px) {
+            .main-content {
+                flex-direction: column;
+                height: auto;
+            }
+            
+            .chat-section {
+                border-right: none;
+                border-bottom: 1px solid #eee;
+            }
+            
+            .stats-section {
+                max-height: 200px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container" id="chatContainer">
+        <div class="header">
+            <h1>🚨 Enhanced Priority Queue Chat System with Offline Messages</h1>
+            <p>Real-time chat with batch processing, retry queues, offline storage, and advanced monitoring</p>
+        </div>
+
+        <div class="main-content">
+            <div class="chat-section">
+                <div id="status" class="disconnected">Status: Disconnected</div>
+                
+                <!-- NEW: Offline message notification -->
+                <div id="offlineNotification" class="offline-notification" style="display: none;">
+                    <div id="offlineNotificationText"></div>
+                </div>
+                
+                <div class="user-info" id="userInfo" style="display: none;">
+                    <div class="user-avatar" id="userAvatar"></div>
+                    <div class="user-details">
+                        <h3 id="userName"></h3>
+                        <p>Connected to enhanced queue system</p>
+                    </div>
+                    <button class="logout-btn" id="logoutBtn">Logout</button>
+                </div>
+
+                <!-- Priority Queue Categories -->
+                <div class="message-categories">
+                    <div class="priority-category urgent-category">
+                        <div class="category-header">
+                            🚨 URGENT MESSAGES <span class="message-count" id="urgentCount">0</span>
+                        </div>
+                        <div class="category-messages" id="urgentMessages">
+                            <div class="empty-category">No urgent messages</div>
+                        </div>
+                    </div>
+
+                    <div class="priority-category high-category">
+                        <div class="category-header">
+                            ⚡ HIGH PRIORITY <span class="message-count" id="highCount">0</span>
+                        </div>
+                        <div class="category-messages" id="highMessages">
+                            <div class="empty-category">No high priority messages</div>
+                        </div>
+                    </div>
+
+                    <div class="priority-category normal-category">
+                        <div class="category-header">
+                            ✅ NORMAL MESSAGES <span class="message-count" id="normalCount">0</span>
+                        </div>
+                        <div class="category-messages" id="normalMessages">
+                            <div class="empty-category">No normal messages</div>
+                        </div>
+                    </div>
+
+                    <div class="priority-category low-category">
+                        <div class="category-header">
+                            💤 LOW & SPAM <span class="message-count" id="lowCount">0</span>
+                        </div>
+                        <div class="category-messages" id="lowMessages">
+                            <div class="empty-category">No low priority messages</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="priority-buttons">
+                    <button class="priority-btn priority-urgent" data-priority="1">🚨 URGENT</button>
+                    <button class="priority-btn priority-high" data-priority="2">⚡ HIGH</button>
+                    <button class="priority-btn priority-normal active" data-priority="3">✅ NORMAL</button>
+                    <button class="priority-btn priority-low" data-priority="4">💤 LOW</button>
+                    <button class="priority-btn" data-priority="" style="background: linear-gradient(135deg, #6c5ce7, #a29bfe);">🤖 AUTO</button>
+                </div>
+
+                <div class="message-input-section">
+                    <input type="text" id="messageInput" placeholder="Type your message here..." maxlength="2000">
+                    <button id="sendBtn">Send</button>
+                </div>
+            </div>
+
+            <div class="stats-section">
+                <div class="stats-panel" id="batchStats">
+                    <div class="stats-title">📦 Batch Processing</div>
+                    <div class="stat-row">
+                        <span class="stat-label">Queue Size:</span>
+                        <span class="stat-value" id="batchQueueSize">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Current Batch:</span>
+                        <span class="stat-value" id="currentBatchSize">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Batches Sent:</span>
+                        <span class="stat-value" id="batchesSent">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Efficiency:</span>
+                        <span class="stat-value" id="batchEfficiency">0%</span>
+                    </div>
+                    <div id="batchStatus" class="batch-indicator batch-processing">Processing</div>
+                </div>
+
+                <div class="stats-panel" id="retryStats">
+                    <div class="stats-title">🔄 Retry Queue</div>
+                    <div class="stat-row">
+                        <span class="stat-label">Pending Retries:</span>
+                        <span class="stat-value" id="retryQueueSize">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Waiting:</span>
+                        <span class="stat-value" id="retryWaitingSize">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Success Rate:</span>
+                        <span class="stat-value" id="retrySuccessRate">0%</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Avg Retries:</span>
+                        <span class="stat-value" id="avgRetries">0</span>
+                    </div>
+                    <div id="retryStatus" class="batch-indicator retry-active">Active</div>
+                </div>
+
+                <!-- NEW: Offline Queue Stats Panel -->
+                <div class="stats-panel" id="offlineStats">
+                    <div class="stats-title">💾 Offline Queue</div>
+                    <div class="stat-row">
+                        <span class="stat-label">Users w/ Messages:</span>
+                        <span class="stat-value" id="offlineUsersCount">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Total Messages:</span>
+                        <span class="stat-value" id="offlineTotalMessages">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Delivery Rate:</span>
+                        <span class="stat-value" id="offlineDeliveryRate">0%</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">My Offline:</span>
+                        <span class="stat-value" id="myOfflineCount">0</span>
+                    </div>
+                    <div id="offlineStatus" class="batch-indicator offline-active">Active</div>
+                </div>
+
+                <div class="stats-panel" id="systemStats">
+                    <div class="stats-title">⚡ System Status</div>
+                    <div class="stat-row">
+                        <span class="stat-label">Total Messages:</span>
+                        <span class="stat-value" id="totalMessages">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Registered Users:</span>
+                        <span class="stat-value" id="registeredUsers">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Online Users:</span>
+                        <span class="stat-value" id="onlineUsers">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Uptime:</span>
+                        <span class="stat-value" id="systemUptime">00:00</span>
+                    </div>
+                </div>
+
+                <div class="stats-panel" id="queueHealth">
+                    <div class="stats-title">💚 Queue Health</div>
+                    <div class="stat-row">
+                        <span class="stat-label">Priority Queue:</span>
+                        <span class="stat-value" style="color: #2ed573;">●</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Batch Queue:</span>
+                        <span class="stat-value" id="batchHealth" style="color: #2ed573;">●</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Retry Queue:</span>
+                        <span class="stat-value" id="retryHealth" style="color: #2ed573;">●</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Circular Queue:</span>
+                        <span class="stat-value" style="color: #2ed573;">●</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Offline Queue:</span>
+                        <span class="stat-value" id="offlineHealth" style="color: #2ed573;">●</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Login Modal -->
+    <div id="loginModal">
+        <div id="loginBox">
+            <h1 class="login-title">Welcome</h1>
+            <p class="login-subtitle">Join the enhanced priority chat system with offline support</p>
+            
+            <div class="input-group">
+                <input type="text" id="loginUsername" placeholder=" " required>
+                <label for="loginUsername">Your Name</label>
+            </div>
+            
+            <div class="input-group">
+                <input type="password" id="loginSecret" placeholder=" " required>
+                <label for="loginSecret">Secret Key</label>
+            </div>
+            
+            <button id="loginBtn">Sign In</button>
+            <div id="loginError"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = null;
+        let selectedPriority = 3;
+        let startTime = Date.now();
+
+        const socket = io();
+        
+        // DOM elements
+        const chatContainer = document.getElementById('chatContainer');
+        const status = document.getElementById('status');
+        const loginModal = document.getElementById('loginModal');
+        const loginBtn = document.getElementById('loginBtn');
+        const loginUsername = document.getElementById('loginUsername');
+        const loginSecret = document.getElementById('loginSecret');
+        const loginError = document.getElementById('loginError');
+        const messageInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const userInfo = document.getElementById('userInfo');
+        const userName = document.getElementById('userName');
+        const userAvatar = document.getElementById('userAvatar');
+        const logoutBtn = document.getElementById('logoutBtn');
+        const offlineNotification = document.getElementById('offlineNotification');
+        const offlineNotificationText = document.getElementById('offlineNotificationText');
+        
+        // Message containers
+        const messageCategories = document.querySelector('.message-categories');
+        const urgentMessages = document.getElementById('urgentMessages');
+        const highMessages = document.getElementById('highMessages');
+        const normalMessages = document.getElementById('normalMessages');
+        const lowMessages = document.getElementById('lowMessages');
+        
+        // Message counters
+        const urgentCount = document.getElementById('urgentCount');
+        const highCount = document.getElementById('highCount');
+        const normalCount = document.getElementById('normalCount');
+        const lowCount = document.getElementById('lowCount');
+
+        // Stats elements
+        const batchQueueSize = document.getElementById('batchQueueSize');
+        const currentBatchSize = document.getElementById('currentBatchSize');
+        const batchesSent = document.getElementById('batchesSent');
+        const batchEfficiency = document.getElementById('batchEfficiency');
+        const batchStatus = document.getElementById('batchStatus');
+        
+        const retryQueueSize = document.getElementById('retryQueueSize');
+        const retryWaitingSize = document.getElementById('retryWaitingSize');
+        const retrySuccessRate = document.getElementById('retrySuccessRate');
+        const avgRetries = document.getElementById('avgRetries');
+        const retryStatus = document.getElementById('retryStatus');
+        
+        // NEW: Offline stats elements
+        const offlineUsersCount = document.getElementById('offlineUsersCount');
+        const offlineTotalMessages = document.getElementById('offlineTotalMessages');
+        const offlineDeliveryRate = document.getElementById('offlineDeliveryRate');
+        const myOfflineCount = document.getElementById('myOfflineCount');
+        const offlineStatus = document.getElementById('offlineStatus');
+        const offlineHealth = document.getElementById('offlineHealth');
+        
+        const registeredUsers = document.getElementById('registeredUsers');
+        const onlineUsers = document.getElementById('onlineUsers');
+        const totalMessages = document.getElementById('totalMessages');
+        const systemUptime = document.getElementById('systemUptime');
+
+        const messageContainers = {
+            urgent: urgentMessages,
+            high: highMessages,
+            normal: normalMessages,
+            low: lowMessages
+        };
+
+        const messageCounts = {
+            urgent: urgentCount,
+            high: highCount,
+            normal: normalCount,
+            low: lowCount
+        };
+
+        // Update uptime every second
+        setInterval(() => {
+            const uptime = Math.floor((Date.now() - startTime) / 1000);
+            const hours = Math.floor(uptime / 3600);
+            const minutes = Math.floor((uptime % 3600) / 60);
+            const seconds = uptime % 60;
+            systemUptime.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }, 1000);
+
+        socket.on('connect', () => { 
+            status.textContent='Status: Connected ✅'; 
+            status.className='connected'; 
+        });
+        
+        socket.on('disconnect', () => { 
+            status.textContent='Status: Disconnected ❌'; 
+            status.className='disconnected'; 
+        });
+
+        socket.on('login_success', (data) => {
+            currentUser = data.username;
+            
+            userName.textContent = currentUser;
+            userAvatar.textContent = currentUser.charAt(0).toUpperCase();
+            userInfo.style.display = 'flex';
+            
+            loginModal.style.display = 'none';
+            chatContainer.style.display = 'block';
+            
+            messageInput.focus();
+        });
+
+        socket.on('login_error', (msg) => {
+            loginError.textContent = msg;
+            loginError.style.display = 'block';
+        });
+
+        // NEW: Handle offline message notifications
+        socket.on('offline_messages_notification', (data) => {
+            offlineNotificationText.textContent = data.message;
+            offlineNotification.style.display = 'block';
+            
+            // Auto-hide after 10 seconds
+            setTimeout(() => {
+                offlineNotification.style.display = 'none';
+            }, 10000);
+        });
+
+        socket.on('offline_messages_delivered', (data) => {
+            console.log(`Received ${data.message_count} offline messages`);
+            
+            // Add delivered messages to display (they'll appear in their priority categories)
+            // The messages are already processed through the batch system
+            
+            offlineStatus.textContent = `Delivered ${data.message_count} msgs`;
+            offlineStatus.className = 'batch-indicator offline-delivering';
+            
+            setTimeout(() => {
+                offlineStatus.textContent = 'Active';
+                offlineStatus.className = 'batch-indicator offline-active';
+            }, 3000);
+        });
+
+        // NEW: Handle offline queue statistics
+        socket.on('offline_stats', (stats) => {
+            offlineUsersCount.textContent = stats.users_with_messages || 0;
+            offlineTotalMessages.textContent = stats.total_pending_messages || 0;
+            offlineDeliveryRate.textContent = Math.round(stats.statistics?.delivery_success_rate || 0) + '%';
+            
+            // Update health indicator
+            if (stats.is_running) {
+                offlineHealth.style.color = '#2ed573';
+                offlineHealth.textContent = '●';
+            } else {
+                offlineHealth.style.color = '#ff4757';
+                offlineHealth.textContent = '●';
+            }
+        });
+
+        socket.on('my_offline_count', (data) => {
+            myOfflineCount.textContent = data.count;
+        });
+
+        // Handle batch queue updates
+        socket.on('batch_update', (data) => {
+            batchStatus.textContent = `Batch sent: ${data.batch_size} msgs`;
+            batchStatus.className = 'batch-indicator batch-sent';
+            
+            setTimeout(() => {
+                batchStatus.textContent = 'Processing';
+                batchStatus.className = 'batch-indicator batch-processing';
+            }, 3000);
+        });
+
+        // Handle batch statistics
+        socket.on('batch_stats', (stats) => {
+            batchQueueSize.textContent = stats.queue_size || 0;
+            currentBatchSize.textContent = stats.current_batch_size || 0;
+            batchesSent.textContent = stats.statistics?.total_batches_sent || 0;
+            batchEfficiency.textContent = Math.round(stats.statistics?.efficiency_score || 0) + '%';
+        });
+
+        // Handle retry statistics
+        socket.on('retry_stats', (stats) => {
+            retryQueueSize.textContent = stats.retry_queue_size || 0;
+            retryWaitingSize.textContent = stats.waiting_queue_size || 0;
+            
+            const total = stats.statistics?.total_messages_added || 0;
+            const succeeded = stats.statistics?.total_messages_succeeded || 0;
+            const successRate = total > 0 ? Math.round((succeeded / total) * 100) : 0;
+            retrySuccessRate.textContent = successRate + '%';
+            
+            avgRetries.textContent = (stats.statistics?.average_retry_count || 0).toFixed(1);
+        });
+
+        // Handle retry success/failure notifications
+        socket.on('retry_success', (data) => {
+            retryStatus.textContent = `Success: ${data.retry_attempts} attempts`;
+            retryStatus.className = 'batch-indicator batch-sent';
+            
+            setTimeout(() => {
+                retryStatus.textContent = 'Active';
+                retryStatus.className = 'batch-indicator retry-active';
+            }, 3000);
+        });
+
+        socket.on('retry_failure', (data) => {
+            retryStatus.textContent = `Failed: ${data.retry_attempts} attempts`;
+            retryStatus.className = 'batch-indicator retry-failed';
+            
+            setTimeout(() => {
+                retryStatus.textContent = 'Active';
+                retryStatus.className = 'batch-indicator retry-active';
+            }, 5000);
+        });
+
+        // Handle organized message structure from server
+        socket.on('message_organization', (organizedMessages) => {
+            const hasAnyMessages = Object.values(organizedMessages).some(messages => messages.length > 0);
+            
+            if (hasAnyMessages) {
+                messageCategories.classList.add('has-messages');
+            } else {
+                messageCategories.classList.remove('has-messages');
+            }
+            
+            Object.values(messageContainers).forEach(container => {
+                container.innerHTML = '';
+            });
+            
+            const categories = ['urgent', 'high', 'normal', 'low'];
+            let totalMsgs = 0;
+            
+            categories.forEach(category => {
+                const messages = organizedMessages[category] || [];
+                const container = messageContainers[category];
+                const counter = messageCounts[category];
+                const categoryElement = container.closest('.priority-category');
+                
+                totalMsgs += messages.length;
+                
+                if (messages.length === 0) {
+                    categoryElement.classList.add('empty');
+                    categoryElement.classList.remove('has-messages');
+                    counter.textContent = '0';
+                } else {
+                    categoryElement.classList.remove('empty');
+                    categoryElement.classList.add('has-messages');
+                    container.innerHTML = '';
+                    messages.forEach(msg => {
+                        addMessageToCategory(msg, container);
+                    });
+                    counter.textContent = messages.length;
+                }
+            });
+            
+            totalMessages.textContent = totalMsgs;
+        });
+
+        function addMessageToCategory(msg, container) {
+            const div = document.createElement('div');
+            div.className = `message ${msg.priority_name ? msg.priority_name.toLowerCase() : 'normal'}`;
+            
+            // NEW: Add offline message styling
+            if (msg.offline_delivery || msg.was_offline_message) {
+                div.classList.add('offline-message');
+            }
+            
+            const header = document.createElement('div');
+            header.className = 'message-header';
+            
+            const userSpan = document.createElement('span'); 
+            userSpan.className = 'message-user'; 
+            userSpan.textContent = msg.user;
+            
+            const timeSpan = document.createElement('span');
+            timeSpan.className = 'message-time';
+            if (msg.timestamp) {
+                const time = new Date(msg.timestamp);
+                timeSpan.textContent = time.toLocaleTimeString();
+            }
+            
+            header.appendChild(userSpan); 
+            header.appendChild(timeSpan);
+            
+            const textDiv = document.createElement('div'); 
+            textDiv.className = 'message-text';
+            
+            if (msg.is_spam) {
+                textDiv.innerHTML = `<span style="color: #ff3838; font-weight: bold;">🚨 SPAM:</span> ${msg.text}`;
+                div.classList.add('spam-message');
+                
+                if (msg.alert_message) {
+                    const alertSpan = document.createElement('span'); 
+                    alertSpan.className = 'spam-alert'; 
+                    alertSpan.textContent = msg.alert_message;
+                    div.appendChild(alertSpan);
+                }
+            } else {
+                textDiv.textContent = msg.text;
+            }
+            
+            // Add retry indicator if message was retried
+            if (msg.retry_success) {
+                const retryBadge = document.createElement('span');
+                retryBadge.style.cssText = 'background: #4caf50; color: white; padding: 2px 4px; border-radius: 4px; font-size: 8px; margin-left: 5px;';
+                retryBadge.textContent = `Retried ${msg.retry_attempts}x`;
+                header.appendChild(retryBadge);
+            }
+            
+            // NEW: Add offline delivery indicator
+            if (msg.offline_delivery || msg.was_offline_message) {
+                const offlineBadge = document.createElement('span');
+                offlineBadge.className = 'offline-badge';
+                offlineBadge.textContent = 'OFFLINE';
+                div.appendChild(offlineBadge);
+                
+                if (msg.stored_duration) {
+                    const durationBadge = document.createElement('span');
+                    durationBadge.style.cssText = 'background: #4facfe; color: white; padding: 2px 4px; border-radius: 4px; font-size: 8px; margin-left: 5px;';
+                    const hours = Math.floor(msg.stored_duration / 3600);
+                    const minutes = Math.floor((msg.stored_duration % 3600) / 60);
+                    durationBadge.textContent = hours > 0 ? `${hours}h ${minutes}m offline` : `${minutes}m offline`;
+                    header.appendChild(durationBadge);
+                }
+            }
+            
+            div.appendChild(header); 
+            div.appendChild(textDiv); 
+            container.appendChild(div);
+            
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function logout() {
+            currentUser = null;
+            chatContainer.style.display = 'none';
+            loginModal.style.display = 'flex';
+            loginUsername.value = '';
+            loginSecret.value = '';
+            loginError.style.display = 'none';
+            userInfo.style.display = 'none';
+            messageCategories.classList.remove('has-messages');
+            offlineNotification.style.display = 'none'; // NEW
+            
+            Object.values(messageContainers).forEach(container => {
+                container.innerHTML = '';
+            });
+            
+            Object.values(messageCounts).forEach(counter => {
+                counter.textContent = '0';
+            });
+            
+            loginUsername.focus();
+        }
+
+        function sendMessage() {
+            const message = messageInput.value.trim();
+            if(!message || !currentUser) return;
+            
+            socket.emit('send_message', { message, priority: selectedPriority });
+            messageInput.value = '';
+        }
+
+        sendBtn.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => { 
+            if(e.key === 'Enter') sendMessage(); 
+        });
+
+        logoutBtn.addEventListener('click', logout);
+
+        document.querySelectorAll('.priority-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                selectedPriority = btn.dataset.priority ? parseInt(btn.dataset.priority) : null;
+                document.querySelectorAll('.priority-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+        });
+
+        loginBtn.addEventListener('click', () => {
+            const username = loginUsername.value.trim();
+            const secret = loginSecret.value.trim();
+            
+            loginError.style.display = 'none';
+            
+            if(!username || !secret) { 
+                loginError.textContent = 'Please enter both your name and secret key'; 
+                loginError.style.display = 'block';
+                return; 
+            }
+            
+            socket.emit('login', { username, secretKey: secret });
+        });
+
+        [loginUsername, loginSecret].forEach(input => {
+            input.addEventListener('keypress', (e) => {
+                if(e.key === 'Enter') {
+                    loginBtn.click();
+                }
+            });
+        });
+
+        window.addEventListener('load', () => {
+            loginUsername.focus();
+        });
+
+        socket.on('connect', () => {
+            if (currentUser) {
+                socket.emit('request_messages');
+                socket.emit('request_my_offline_count'); // NEW
+            }
+        });
+
+        // Request stats updates every 5 seconds
+        setInterval(() => {
+            if (currentUser) {
+                socket.emit('request_batch_stats');
+                socket.emit('request_retry_stats');
+                socket.emit('request_offline_stats');
+                socket.emit('request_my_offline_count');
+                // NEW: Also update general user stats
+                requestOfflineQueueUpdate();
+            }
+        }, 2000);
+
+        // NEW: Handle message queued confirmation (now shows offline users notified)
+        socket.on('message_queued', (data) => {
+            if (data.offline_users_notified > 0) {
+                console.log(`Message queued for ${data.offline_users_notified} offline users`);
+            }
+        });
+    </script>
+</body>
+</html>
