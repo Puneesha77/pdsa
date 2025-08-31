@@ -17,7 +17,7 @@ class CircularQueue:
     - Prevents unlimited memory growth
     """
 
-    def __init__(self, max_size: int = 1000):
+    def __init__(self, max_size: int = 10):
         """
         Initialize the circular queue
 
