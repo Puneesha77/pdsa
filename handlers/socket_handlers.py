@@ -46,6 +46,10 @@ class ChatSocketHandlers:
         def handle_get_stats():
             return self.on_get_stats()
 
+        @self.socketio.on('get_history')
+        def handle_get_history():
+            return self.on_get_history()
+
         @self.socketio.on_error_default
         def handle_error(e):
             return self.on_error(e)
@@ -171,6 +175,15 @@ class ChatSocketHandlers:
             emit('queue_stats', stats)
         except Exception as e:
             emit('error', {'type': 'stats_error', 'message': 'Failed to get statistics'})
+
+    def on_get_history(self):
+        """Handle request for chat history (last N messages)"""
+        try:
+            history = self.message_system.get_history()
+            formatted_history = [format_message_for_client(msg) for msg in history]
+            emit('chat_history', formatted_history)
+        except Exception as e:
+            emit('error', {'type': 'history_error', 'message': 'Failed to get chat history'})
 
     def on_error(self, e):
         """Handle socket errors"""

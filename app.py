@@ -10,7 +10,9 @@ from dotenv import load_dotenv
 import os
 import re
 from datetime import datetime
-from collections import defaultdict, deque
+from collections import defaultdict
+from collections import deque
+from models.circular_queue import CircularQueue
 
 # Load environment variables
 load_dotenv()
@@ -83,7 +85,7 @@ class SpamDetector:
 class PriorityMessageQueue:
     """Priority-based message queue system"""
     
-    def __init__(self, max_messages_per_category=50):
+    def __init__(self, max_messages_per_category=10):
         self.max_messages_per_category = max_messages_per_category
         
         # Separate queues for each priority level
@@ -289,7 +291,7 @@ def handle_login(data):
         #}
         
         # Add welcome message to queue and broadcast organization
-        message_queue.add_message(welcome_msg)
+        # message_queue.add_message(welcome_msg)
         organized_messages = message_queue.get_all_messages_organized()
         emit("message_organization", organized_messages, broadcast=True)
         
@@ -391,13 +393,16 @@ def health_check():
 
 @app.route('/stats')
 def get_stats():
-    """Get system statistics"""
+    """Get system statistics with message history count"""
     queue_stats = message_queue.get_queue_stats()
+    history_count = len(message_queue.get_all_messages_organized())  # just a number ✅
+    
     return {
         'connected_users': len(connected_users),
         'access_code_configured': bool(ACCESS_CODE),
         'spam_detection': 'active',
         'message_queues': queue_stats,
+        'message_history_count': history_count,  # replaced history list with count
         'uptime': 'running'
     }
 
