@@ -1,0 +1,1028 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Priority Chat System 🚨</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        if (typeof io === 'undefined') {
+            document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"><\/script>');
+        }
+    </script>
+
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px;
+            font-size: 13px;
+        }
+
+        .chat-container {
+            max-width: 1100px;
+            width: 100%;
+            background-color: white;
+            border-radius: 15px;
+            box-shadow: 0 15px 30px rgba(0,0,0,0.1);
+            overflow: hidden;
+            display: none;
+        }
+
+        .header { 
+            text-align: center; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            color: white; 
+            padding: 15px; 
+        }
+        
+        .header h1 { font-size: 1.4em; margin-bottom: 5px; font-weight: 300; }
+        .header p { opacity: 0.9; font-size: 0.85em; }
+
+        .chat-content { padding: 15px; }
+
+        /* ===== Layout: main + sidebar (kept minimal) ===== */
+        .chat-layout {
+            display: grid;
+            grid-template-columns: 1fr 290px;
+            gap: 14px;
+        }
+        @media (max-width: 980px) {
+            .chat-layout {
+                grid-template-columns: 1fr;
+            }
+            .sidebar {
+                order: 2;
+            }
+        }
+
+        /* Priority Queue Layout - Row-based design */
+        .message-categories {
+            display: none; /* Hidden initially until messages are received */
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .message-categories.has-messages {
+            display: flex; /* Show when messages exist */
+        }
+
+        .priority-category {
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            overflow: hidden;
+            border: 1px solid rgba(0,0,0,0.05);
+            transition: all 0.3s ease;
+        }
+
+        .priority-category:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+        }
+
+        .priority-category.has-messages { display: block; }
+        .priority-category.empty { display: none; }
+
+        .category-header {
+            padding: 10px 15px;
+            color: white;
+            font-weight: 700;
+            text-align: center;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
+        }
+
+        .urgent-category .category-header { background: linear-gradient(135deg, #ff4757 0%, #ff3838 100%); }
+        .high-category .category-header { background: linear-gradient(135deg, #ffa502 0%, #ff6348 100%); }
+        .normal-category .category-header { background: linear-gradient(135deg, #2ed573 0%, #1e90ff 100%); }
+        .low-category .category-header { background: linear-gradient(135deg, #a55eea 0%, #778beb 100%); }
+
+        .category-messages {
+            padding: 10px 12px;
+            background: linear-gradient(135deg, #f8f9fd 0%, #ffffff 100%);
+            min-height: 60px;
+            max-height: 220px;
+            overflow-y: auto;
+        }
+
+        .category-messages::-webkit-scrollbar { width: 4px; }
+        .category-messages::-webkit-scrollbar-track { background: rgba(0,0,0,0.05); border-radius: 6px; }
+        .category-messages::-webkit-scrollbar-thumb { background: linear-gradient(135deg, #ccc, #999); border-radius: 6px; }
+        .category-messages::-webkit-scrollbar-thumb:hover { background: linear-gradient(135deg, #999, #666); }
+
+        .message { 
+            margin: 6px 0; 
+            padding: 10px 12px; 
+            border-radius: 8px; 
+            background: white; 
+            position: relative; 
+            box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+            border-left: 3px solid;
+            animation: messageSlide 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            transition: all 0.3s ease;
+            display: grid;
+            grid-template-columns: 34px 1fr;
+            gap: 8px;
+        }
+
+        .message:hover {
+            transform: translateX(2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        @keyframes messageSlide {
+            from { opacity: 0; transform: translateX(-20px) scale(0.96); }
+            to   { opacity: 1; transform: translateX(0) scale(1); }
+        }
+        
+        .message.urgent { 
+            border-left-color: #ff4757;
+            background: linear-gradient(135deg, #fff5f5 0%, #ffe8e8 100%);
+            animation: messageSlide 0.3s ease-out, urgentPulse 3s infinite;
+        }
+        .message.high { 
+            border-left-color: #ffa502;
+            background: linear-gradient(135deg, #fff8f0 0%, #ffe4cc 100%);
+        }
+        .message.normal { 
+            border-left-color: #2ed573;
+            background: linear-gradient(135deg, #f0fff4 0%, #e8f8ed 100%);
+        }
+        .message.low { 
+            border-left-color: #a55eea;
+            background: linear-gradient(135deg, #f8f4ff 0%, #ede4ff 100%);
+        }
+
+        /* avatar in message */
+        .msg-avatar {
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 12px;
+            color: white;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+            align-self: start;
+            user-select: none;
+        }
+        
+        .message.spam-message .spam-word { 
+            color: #ff3838; 
+            font-weight: 900; 
+            background: linear-gradient(45deg, #fff5f5, #ffe8e8);
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 10px;
+            text-shadow: 0 1px 2px rgba(255, 56, 56, 0.3);
+            border: 2px solid #ff3838;
+            animation: dangerBlink 1.2s infinite;
+            display: inline-block;
+        }
+
+        .message.spam-message {
+            padding-right: 70px;
+            border: 2px solid #ff3838 !important;
+            background: linear-gradient(135deg, #fff5f5 0%, #ffeaea 100%) !important;
+            animation: messageSlide 0.3s ease-out, dangerShake 0.6s infinite;
+        }
+
+        .message.spam-message .spam-alert { 
+            position: absolute; 
+            top: 8px; 
+            right: 8px; 
+            background: linear-gradient(45deg, #ff3838, #d63031);
+            color: white; 
+            padding: 6px 10px; 
+            font-size: 8px; 
+            font-weight: 900; 
+            border-radius: 15px;
+            box-shadow: 0 4px 10px rgba(255, 56, 56, 0.6);
+            z-index: 15;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            border: 2px solid white;
+            animation: dangerPulse 1s infinite;
+        }
+
+        .offline-indicator {
+            font-size: 10px;
+            font-weight: 800;
+            padding: 2px 6px;
+            border-radius: 10px;
+            background: #ffeaa7;
+            color: #6d4c41;
+            margin-left: 6px;
+            text-transform: uppercase;
+        }
+
+        @keyframes dangerBlink {
+            0%, 50% { opacity: 1; transform: scale(1); }
+            51%, 100% { opacity: 0.8; transform: scale(0.98); }
+        }
+        @keyframes dangerShake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-1px); }
+            75% { transform: translateX(1px); }
+        }
+        @keyframes dangerPulse {
+            0% { transform: scale(1); box-shadow: 0 4px 10px rgba(255, 56, 56, 0.6); }
+            50% { transform: scale(1.05); box-shadow: 0 6px 15px rgba(255, 56, 56, 0.8); }
+            100% { transform: scale(1); box-shadow: 0 4px 10px rgba(255, 56, 56, 0.6); }
+        }
+        @keyframes urgentPulse { 
+            0% { box-shadow: 0 2px 8px rgba(0,0,0,0.06), 0 0 0 0 rgba(255, 71, 87, 0.7); } 
+            70% { box-shadow: 0 2px 8px rgba(0,0,0,0.06), 0 0 0 10px rgba(255, 71, 87, 0); } 
+            100% { box-shadow: 0 2px 8px rgba(0,0,0,0.06), 0 0 0 0 rgba(255, 71, 87, 0); } 
+        }
+        
+        .message-header { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            margin-bottom: 6px; 
+        }
+        .message-user { 
+            font-weight: 700; 
+            color: #2c3e50; 
+            font-size: 11px;
+            background: rgba(0,0,0,0.05);
+            padding: 2px 6px;
+            border-radius: 8px;
+        }
+        .message-time {
+            font-size: 9px;
+            color: #7f8c8d;
+            opacity: 0.8;
+            font-weight: 500;
+        }
+        .message-text { 
+            margin-top: 4px; 
+            line-height: 1.4; 
+            color: #2c3e50; 
+            font-size: 12px;
+            font-weight: 400;
+        }
+
+        .empty-category {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #95a5a6;
+            font-style: italic;
+            font-size: 11px;
+            flex-direction: column;
+            gap: 5px;
+            padding: 15px 0;
+        }
+
+        .empty-category::before {
+            content: "📭";
+            font-size: 1.5em;
+            opacity: 0.5;
+        }
+        
+        .priority-buttons { 
+            display: flex; 
+            gap: 8px; 
+            margin-bottom: 15px; 
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        
+        .priority-btn { 
+            padding: 8px 14px; 
+            border: none; 
+            border-radius: 20px; 
+            cursor: pointer; 
+            font-size: 10px; 
+            font-weight: 700; 
+            color: white; 
+            transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            box-shadow: 0 3px 12px rgba(0,0,0,0.12);
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
+            position: relative;
+            overflow: hidden;
+        }
+        .priority-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+            transition: left 0.5s;
+        }
+        .priority-btn:hover::before { left: 100%; }
+        .priority-btn:hover { transform: translateY(-2px) scale(1.03); box-shadow: 0 6px 18px rgba(0,0,0,0.2); }
+        .priority-btn.active { transform: translateY(-1px) scale(1.05); box-shadow: 0 0 0 2px rgba(255,255,255,0.6), 0 6px 18px rgba(0,0,0,0.2); }
+
+        .priority-urgent { background: linear-gradient(135deg, #ff4757 0%, #ff3838 100%); }
+        .priority-high { background: linear-gradient(135deg, #ffa502 0%, #ff6348 100%); }
+        .priority-normal { background: linear-gradient(135deg, #2ed573 0%, #1e90ff 100%); }
+        .priority-low { background: linear-gradient(135deg, #a55eea 0%, #778beb 100%); }
+        
+        .message-input-section { 
+            display: flex; 
+            gap: 10px; 
+            align-items: center;
+        }
+        
+        #messageInput { 
+            flex: 1; 
+            padding: 12px 18px; 
+            border: 2px solid #e0e6ed; 
+            border-radius: 20px; 
+            font-size: 12px; 
+            transition: all 0.3s ease;
+            outline: none;
+            background: #f8f9fa;
+        }
+        #messageInput:focus { 
+            border-color: #667eea; 
+            background: white;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            transform: translateY(-1px);
+        }
+        
+        #sendBtn { 
+            padding: 12px 20px; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            color: white; 
+            border: none; 
+            border-radius: 20px; 
+            cursor: pointer; 
+            font-weight: 700; 
+            font-size: 11px;
+            transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        #sendBtn:hover { transform: translateY(-2px) scale(1.03); box-shadow: 0 6px 18px rgba(102, 126, 234, 0.4); }
+        
+        #status { 
+            margin: 10px 0; 
+            font-weight: 600; 
+            text-align: center; 
+            padding: 10px; 
+            border-radius: 20px; 
+            font-size: 11px;
+        }
+        
+        .connected { 
+            color: #2ed573; 
+            background: linear-gradient(135deg, #f0fff4 0%, #e8f8ed 100%);
+            border: 2px solid #2ed573;
+        }
+        .disconnected { 
+            color: #ff4757; 
+            background: linear-gradient(135deg, #fff5f5 0%, #ffe8e8 100%);
+            border: 2px solid #ff4757;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+            padding: 12px 15px;
+            background: linear-gradient(135deg, #f8f9fd 0%, #ffffff 100%);
+            border-radius: 15px;
+            border-left: 4px solid #667eea;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.06);
+            position: relative;
+        }
+
+        .logout-btn {
+            position: absolute;
+            right: 15px;
+            padding: 5px 10px;
+            background: linear-gradient(135deg, #ff4757 0%, #ff3838 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 9px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        .logout-btn:hover { transform: translateY(-1px) scale(1.03); box-shadow: 0 4px 12px rgba(255, 71, 87, 0.4); }
+
+        .user-avatar {
+            width: 35px;
+            height: 35px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 700;
+            font-size: 14px;
+            box-shadow: 0 3px 10px rgba(102, 126, 234, 0.3);
+        }
+
+        .user-details h3 { margin: 0; color: #2c3e50; font-size: 14px; font-weight: 700; }
+        .user-details p { margin: 2px 0 0 0; color: #7f8c8d; font-size: 10px; font-weight: 500; }
+
+        /* ===== Sidebar ===== */
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .panel {
+            background: linear-gradient(135deg, #f8f9fd 0%, #ffffff 100%);
+            border: 1px solid rgba(0,0,0,0.06);
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+            overflow: hidden;
+        }
+        .panel-header {
+            padding: 10px 12px;
+            font-size: 11px;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            color: white;
+            background: linear-gradient(135deg, #6c5ce7, #a29bfe);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .panel-body {
+            padding: 10px;
+            max-height: 260px;
+            overflow: auto;
+        }
+        .panel-body::-webkit-scrollbar { width: 4px; }
+        .panel-body::-webkit-scrollbar-thumb { background: #c9cdfa; border-radius: 6px; }
+
+        .sys-item, .queue-item {
+            padding: 8px;
+            margin-bottom: 8px;
+            border-radius: 8px;
+            background: #fff;
+            border-left: 3px solid #6c5ce7;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+            font-size: 12px;
+            line-height: 1.3;
+        }
+        .sys-time, .queue-meta {
+            font-size: 10px;
+            color: #7f8c8d;
+            margin-top: 4px;
+        }
+        .sys-join { border-left-color: #2ed573; }
+        .sys-leave { border-left-color: #ff7675; }
+        .sys-info { border-left-color: #6c5ce7; }
+        .queue-item.offline { border-left-color: #ffa502; }
+
+        .clear-btn {
+            border: none;
+            font-size: 10px;
+            font-weight: 800;
+            padding: 6px 8px;
+            border-radius: 8px;
+            cursor: pointer;
+            background: rgba(255,255,255,0.25);
+            color: #fff;
+        }
+        .clear-btn:hover { background: rgba(255,255,255,0.4); }
+
+        .message-count {
+            background: rgba(255,255,255,0.9);
+            color: #333;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 9px;
+            font-weight: 700;
+            margin-left: 6px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+        }
+
+        @media (max-width: 768px) {
+            body { padding: 5px; font-size: 12px; }
+            .chat-container { max-width: 100%; border-radius: 10px; }
+            .header { padding: 10px; }
+            .header h1 { font-size: 1.2em; }
+            .chat-content { padding: 10px; }
+            .message-categories { gap: 8px; margin-bottom: 15px; }
+            .category-messages { max-height: 180px; padding: 8px 10px; }
+            .priority-category { border-radius: 8px; }
+            #loginBox { padding: 25px 20px; margin: 10px; }
+            .login-title { font-size: 1.5em; }
+            .priority-buttons { justify-content: center; gap: 6px; }
+            .priority-btn { padding: 6px 10px; font-size: 9px; }
+            .message-input-section { flex-direction: column; gap: 8px; }
+            #sendBtn { width: 100%; }
+            .user-info { padding: 10px 12px; margin-bottom: 12px; }
+            .user-avatar { width: 30px; height: 30px; font-size: 12px; }
+            .panel-body { max-height: 200px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container" id="chatContainer">
+        <div class="header">
+            <h1>🚨 Priority Queue Chat System</h1>
+            <p>Messages are automatically organized by priority! Each type gets its own section.</p>
+        </div>
+
+        <div class="chat-content">
+            <div id="status" class="disconnected">Status: Disconnected</div>
+            
+            <div class="user-info" id="userInfo" style="display: none;">
+                <div class="user-avatar" id="userAvatar"></div>
+                <div class="user-details">
+                    <h3 id="userName"></h3>
+                    <p>Connected to priority queue system</p>
+                </div>
+                <button class="logout-btn" id="logoutBtn">🚪 Logout</button>
+            </div>
+
+            <div class="chat-layout">
+                <!-- ===== Main column ===== -->
+                <div>
+                    <!-- Priority Queue Categories -->
+                    <div class="message-categories">
+                        <div class="priority-category urgent-category">
+                            <div class="category-header">
+                                🚨 URGENT MESSAGES <span class="message-count" id="urgentCount">0</span>
+                            </div>
+                            <div class="category-messages" id="urgentMessages">
+                                <div class="empty-category">No urgent messages</div>
+                            </div>
+                        </div>
+
+                        <div class="priority-category high-category">
+                            <div class="category-header">
+                                ⚡ HIGH PRIORITY <span class="message-count" id="highCount">0</span>
+                            </div>
+                            <div class="category-messages" id="highMessages">
+                                <div class="empty-category">No high priority messages</div>
+                            </div>
+                        </div>
+
+                        <div class="priority-category normal-category">
+                            <div class="category-header">
+                                ✅ NORMAL MESSAGES <span class="message-count" id="normalCount">0</span>
+                            </div>
+                            <div class="category-messages" id="normalMessages">
+                                <div class="empty-category">No normal messages</div>
+                            </div>
+                        </div>
+
+                        <div class="priority-category low-category">
+                            <div class="category-header">
+                                💤 LOW & SPAM <span class="message-count" id="lowCount">0</span>
+                            </div>
+                            <div class="category-messages" id="lowMessages">
+                                <div class="empty-category">No low priority messages</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="priority-buttons">
+                        <button class="priority-btn priority-urgent" data-priority="1">🚨 URGENT</button>
+                        <button class="priority-btn priority-high" data-priority="2">⚡ HIGH</button>
+                        <button class="priority-btn priority-normal active" data-priority="3">✅ NORMAL</button>
+                        <button class="priority-btn priority-low" data-priority="4">💤 LOW</button>
+                        <button class="priority-btn" data-priority="" style="background: linear-gradient(135deg, #6c5ce7, #a29bfe);">🤖 AUTO</button>
+                    </div>
+
+                    <div class="message-input-section">
+                        <input type="text" id="messageInput" placeholder="Type your message here..." maxlength="2000">
+                        <button id="sendBtn">Send</button>
+                    </div>
+                </div>
+
+                <!-- ===== Sidebar ===== -->
+                <aside class="sidebar">
+                    <div class="panel" id="systemPanel">
+                        <div class="panel-header">
+                            <span>🛠️ System Messages</span>
+                            <button class="clear-btn" id="clearSystemBtn">Clear</button>
+                        </div>
+                        <div class="panel-body" id="systemMessages">
+                            <!-- system messages appear here -->
+                        </div>
+                    </div>
+
+                    <div class="panel" id="offlinePanel">
+                        <div class="panel-header">
+                            <span>📦 Offline Queue</span>
+                            <button class="clear-btn" id="clearQueueBtn">Clear</button>
+                        </div>
+                        <div class="panel-body" id="offlineQueue">
+                            <!-- queued (stored) messages appear here -->
+                        </div>
+                    </div>
+                </aside>
+            </div>
+        </div>
+    </div>
+
+    <!-- Beautiful Login Modal -->
+    <div id="loginModal">
+        <div class="floating-shapes">
+            <div class="shape" style="width: 80px; height: 80px; background: rgba(255,255,255,0.1); border-radius: 50%;"></div>
+            <div class="shape" style="width: 120px; height: 120px; background: rgba(255,255,255,0.05); border-radius: 20px;"></div>
+            <div class="shape" style="width: 60px; height: 60px; background: rgba(255,255,255,0.1); border-radius: 10px;"></div>
+        </div>
+        
+        <div id="loginBox">
+            <h1 class="login-title">Welcome</h1>
+            <p class="login-subtitle">Please sign in to join the priority chat system</p>
+            
+            <div class="input-group">
+                <input type="text" id="loginUsername" placeholder=" " required>
+                <label for="loginUsername">Your Name</label>
+            </div>
+            
+            <div class="input-group">
+                <input type="password" id="loginSecret" placeholder=" " required>
+                <label for="loginSecret">Secret Key</label>
+            </div>
+            
+            <button id="loginBtn">Sign In</button>
+            <div id="loginError"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = null;
+        let selectedPriority = 3; // Default to normal
+
+        const socket = io('', {
+            query: { code: 'your_access_code_here' }
+        });
+        
+        // DOM elements
+        const chatContainer = document.getElementById('chatContainer');
+        const status = document.getElementById('status');
+        const loginModal = document.getElementById('loginModal');
+        const loginBtn = document.getElementById('loginBtn');
+        const loginUsername = document.getElementById('loginUsername');
+        const loginSecret = document.getElementById('loginSecret');
+        const loginError = document.getElementById('loginError');
+        const messageInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const userInfo = document.getElementById('userInfo');
+        const userName = document.getElementById('userName');
+        const userAvatar = document.getElementById('userAvatar');
+        const logoutBtn = document.getElementById('logoutBtn');
+        
+        // Sidebar panels
+        const systemMessagesEl = document.getElementById('systemMessages');
+        const clearSystemBtn = document.getElementById('clearSystemBtn');
+        const offlineQueueEl = document.getElementById('offlineQueue');
+        const clearQueueBtn = document.getElementById('clearQueueBtn');
+        
+        // Message containers
+        const messageCategories = document.querySelector('.message-categories');
+        const urgentMessages = document.getElementById('urgentMessages');
+        const highMessages = document.getElementById('highMessages');
+        const normalMessages = document.getElementById('normalMessages');
+        const lowMessages = document.getElementById('lowMessages');
+        
+        // Message counters
+        const urgentCount = document.getElementById('urgentCount');
+        const highCount = document.getElementById('highCount');
+        const normalCount = document.getElementById('normalCount');
+        const lowCount = document.getElementById('lowCount');
+
+        const messageContainers = {
+            urgent: urgentMessages,
+            high: highMessages,
+            normal: normalMessages,
+            low: lowMessages
+        };
+
+        const messageCounts = {
+            urgent: urgentCount,
+            high: highCount,
+            normal: normalCount,
+            low: lowCount
+        };
+
+        /* ===== Socket connectivity ===== */
+        socket.on('connect', () => { 
+            status.textContent='Status: Connected ✅'; 
+            status.className='connected'; 
+            // refresh messages if already logged in
+            if (currentUser) socket.emit('request_messages');
+        });
+        
+        socket.on('disconnect', () => { 
+            status.textContent='Status: Disconnected ❌'; 
+            status.className='disconnected'; 
+        });
+
+        /* ===== Login flow ===== */
+        socket.on('login_success', (data) => {
+            currentUser = data.username;
+            
+            // Update user info display
+            userName.textContent = currentUser;
+            userAvatar.textContent = currentUser.charAt(0).toUpperCase();
+            userInfo.style.display = 'flex';
+            
+            // Hide login modal and show chat (no welcome message)
+            loginModal.style.display = 'none';
+            chatContainer.style.display = 'block';
+            
+            // Focus on message input
+            messageInput.focus();
+
+            // request any offline queue for me
+            socket.emit('request_offline_queue');
+        });
+
+        socket.on('login_error', (msg) => {
+            loginError.textContent = msg;
+            loginError.style.display = 'block';
+        });
+
+        /* ===== Organized messages from server ===== */
+        socket.on('message_organization', (organizedMessages) => {
+            const hasAnyMessages = Object.values(organizedMessages).some(messages => messages.length > 0);
+            if (hasAnyMessages) messageCategories.classList.add('has-messages');
+            else messageCategories.classList.remove('has-messages');
+
+            // Clear all containers
+            Object.values(messageContainers).forEach(container => { container.innerHTML = ''; });
+
+            const categories = ['urgent', 'high', 'normal', 'low'];
+            categories.forEach(category => {
+                const messages = organizedMessages[category] || [];
+                const container = messageContainers[category];
+                const counter = messageCounts[category];
+                const categoryElement = container.closest('.priority-category');
+                
+                if (messages.length === 0) {
+                    categoryElement.classList.add('empty');
+                    categoryElement.classList.remove('has-messages');
+                    counter.textContent = '0';
+                } else {
+                    categoryElement.classList.remove('empty');
+                    categoryElement.classList.add('has-messages');
+                    container.innerHTML = '';
+                    messages.forEach(msg => {
+                        addMessageToCategory(msg, container);
+                    });
+                    counter.textContent = messages.length;
+                }
+            });
+        });
+
+        /* ===== System messages panel ===== */
+        function pushSystemMessage(type, text, ts) {
+            const item = document.createElement('div');
+            const cls = type === 'join' ? 'sys-join' : (type === 'leave' ? 'sys-leave' : 'sys-info');
+            item.className = `sys-item ${cls}`;
+            const timeStr = ts ? new Date(ts).toLocaleTimeString() : new Date().toLocaleTimeString();
+            item.innerHTML = `
+                <div>${text}</div>
+                <div class="sys-time">${timeStr}</div>
+            `;
+            systemMessagesEl.appendChild(item);
+            systemMessagesEl.scrollTop = systemMessagesEl.scrollHeight;
+        }
+
+        clearSystemBtn.addEventListener('click', () => {
+            systemMessagesEl.innerHTML = '';
+        });
+
+        // server may emit generic system messages
+        socket.on('system_message', (payload) => {
+            // payload: { type: 'info'|'join'|'leave', text, timestamp }
+            pushSystemMessage(payload.type || 'info', payload.text || '', payload.timestamp);
+        });
+
+        // join/leave events
+        socket.on('user_join', (data) => {
+            const name = data?.username || 'Someone';
+            pushSystemMessage('join', `🟢 ${name} joined`, data?.timestamp);
+        });
+
+        socket.on('user_leave', (data) => {
+            const name = data?.username || 'Someone';
+            pushSystemMessage('leave', `🔴 ${name} left`, data?.timestamp);
+        });
+
+        /* ===== Offline queue panel ===== */
+        function pushOfflineItem(q) {
+            // q: { from, text, timestamp, priority, was_offline: true }
+            const div = document.createElement('div');
+            div.className = 'queue-item offline';
+            const timeStr = q.timestamp ? new Date(q.timestamp).toLocaleString() : '';
+            div.innerHTML = `
+                <div><strong>${q.from || 'Unknown'}:</strong> ${q.text || ''}</div>
+                <div class="queue-meta">${timeStr} • priority: ${q.priority ?? '-'}</div>
+            `;
+            offlineQueueEl.appendChild(div);
+        }
+        function clearOfflineQueueUI() {
+            offlineQueueEl.innerHTML = '';
+        }
+        clearQueueBtn.addEventListener('click', clearOfflineQueueUI);
+
+        // full queue payload (array)
+        socket.on('offline_queue', (list) => {
+            clearOfflineQueueUI();
+            if (Array.isArray(list)) {
+                list.forEach(pushOfflineItem);
+            }
+        });
+
+        // single queued message delivered later
+        socket.on('offline_delivered', (msg) => {
+            // Show subtle indicator in sidebar
+            pushOfflineItem({
+                from: msg.user || msg.from,
+                text: msg.text,
+                timestamp: msg.timestamp || Date.now(),
+                priority: msg.priority_name || msg.priority || '-',
+                was_offline: true
+            });
+            // Also render it in its category with "offline" tag
+            renderSingleMessageInCategory(msg, true);
+        });
+
+        /* ===== Rendering ===== */
+        function avatarElement(name, avatarUrl) {
+            const span = document.createElement('div');
+            span.className = 'msg-avatar';
+            if (avatarUrl) {
+                span.style.background = `center/cover no-repeat url('${avatarUrl}')`;
+                span.textContent = '';
+            } else {
+                span.textContent = (name || '?').charAt(0).toUpperCase();
+            }
+            return span;
+        }
+
+        function addMessageToCategory(msg, container, showOfflineBadge = false) {
+            const div = document.createElement('div');
+            div.className = `message ${msg.priority_name ? msg.priority_name.toLowerCase() : 'normal'}`;
+            
+            // avatar
+            const av = avatarElement(msg.user, msg.avatarUrl);
+            div.appendChild(av);
+
+            const bodyWrap = document.createElement('div');
+
+            const header = document.createElement('div');
+            header.className = 'message-header';
+            
+            const userSpan = document.createElement('span'); 
+            userSpan.className = 'message-user'; 
+            userSpan.textContent = msg.user;
+
+            if (showOfflineBadge || msg.offline_delivered) {
+                const off = document.createElement('span');
+                off.className = 'offline-indicator';
+                off.textContent = 'offline';
+                userSpan.appendChild(off);
+            }
+            
+            const timeSpan = document.createElement('span');
+            timeSpan.className = 'message-time';
+            if (msg.timestamp) {
+                const time = new Date(msg.timestamp);
+                timeSpan.textContent = time.toLocaleTimeString();
+            }
+            
+            header.appendChild(userSpan); 
+            header.appendChild(timeSpan);
+            
+            const textDiv = document.createElement('div'); 
+            textDiv.className = 'message-text';
+            
+            if (msg.is_spam) {
+                textDiv.innerHTML = `<span class="spam-word">🚨 SPAM:</span> ${msg.text}`;
+                div.classList.add('spam-message');
+                
+                if (msg.alert_message) {
+                    const alertSpan = document.createElement('span'); 
+                    alertSpan.className = 'spam-alert'; 
+                    alertSpan.textContent = msg.alert_message;
+                    div.appendChild(alertSpan);
+                }
+            } else {
+                textDiv.textContent = msg.text;
+            }
+            
+            bodyWrap.appendChild(header);
+            bodyWrap.appendChild(textDiv);
+            div.appendChild(bodyWrap);
+            container.appendChild(div);
+            
+            // Auto scroll to bottom
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function renderSingleMessageInCategory(msg, showOfflineBadge = false) {
+            const name = (msg.priority_name || '').toLowerCase();
+            const container = messageContainers[name] || normalMessages;
+            const counter = messageCounts[name] || messageCounts.normal;
+            const categoryElement = container.closest('.priority-category');
+
+            if (categoryElement.classList.contains('empty')) {
+                categoryElement.classList.remove('empty');
+                categoryElement.classList.add('has-messages');
+            }
+            addMessageToCategory(msg, container, showOfflineBadge);
+
+            // bump count
+            const newCount = (parseInt(counter.textContent, 10) || 0) + 1;
+            counter.textContent = newCount;
+
+            // ensure main block visible
+            messageCategories.classList.add('has-messages');
+        }
+
+        /* ===== Logout / Send ===== */
+        function logout() {
+            currentUser = null;
+            chatContainer.style.display = 'none';
+            loginModal.style.display = 'flex';
+            loginUsername.value = '';
+            loginSecret.value = '';
+            loginError.style.display = 'none';
+            userInfo.style.display = 'none';
+            messageCategories.classList.remove('has-messages');
+            Object.values(messageContainers).forEach(container => { container.innerHTML = ''; });
+            Object.values(messageCounts).forEach(counter => { counter.textContent = '0'; });
+            systemMessagesEl.innerHTML = '';
+            offlineQueueEl.innerHTML = '';
+            loginUsername.focus();
+        }
+
+        function sendMessage() {
+            const message = messageInput.value.trim();
+            if(!message || !currentUser) return;
+            socket.emit('send_message', { message, priority: selectedPriority });
+            messageInput.value = '';
+        }
+
+        sendBtn.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => { if(e.key === 'Enter') sendMessage(); });
+        logoutBtn.addEventListener('click', logout);
+
+        document.querySelectorAll('.priority-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                selectedPriority = btn.dataset.priority ? parseInt(btn.dataset.priority) : null;
+                document.querySelectorAll('.priority-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+        });
+
+        loginBtn.addEventListener('click', () => {
+            const username = loginUsername.value.trim();
+            const secret = loginSecret.value.trim();
+            loginError.style.display = 'none';
+            if(!username || !secret) { 
+                loginError.textContent = 'Please enter both your name and secret key'; 
+                loginError.style.display = 'block';
+                return; 
+            }
+            socket.emit('login', { username, secretKey: secret });
+        });
+
+        [loginUsername, loginSecret].forEach(input => {
+            input.addEventListener('keypress', (e) => { if(e.key === 'Enter') loginBtn.click(); });
+        });
+
+        window.addEventListener('load', () => { loginUsername.focus(); });
+
+        // Request current messages when connecting (if logged in handled in connect)
+        // Additional: server may emit individual message events
+        socket.on('new_message', (msg) => {
+            // { user, text, timestamp, priority_name, is_spam, alert_message, avatarUrl, offline_delivered }
+            renderSingleMessageInCategory(msg, !!msg.offline_delivered);
+        });
+    </script>
+</body>
+</html>
