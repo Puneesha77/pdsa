@@ -290,16 +290,11 @@ def handle_login(data):
             #"timestamp": datetime.now().isoformat()
         #}
         
-        # Add welcome message to queue and broadcast organization
-<<<<<<< HEAD
-        # message_queue.add_message(welcome_msg)
-=======
-<<<<<<< HEAD
-        # message_queue.add_message(welcome_msg)
-=======
+
+
        # message_queue.add_message(welcome_msg)
->>>>>>> acce635829192ac7b52afb7980d9f879545e2b61
->>>>>>> b66865e9461cde50c7775037016e97ca57716eda
+
+
         organized_messages = message_queue.get_all_messages_organized()
         emit("message_organization", organized_messages, broadcast=True)
         
