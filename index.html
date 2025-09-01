@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Priority Chat System</title>
+    <style>
+        /* ===== Styles ===== */
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+        }
+
+        #status {
+            margin: 10px 0;
+            font-weight: bold;
+            text-align: center;
+            padding: 8px;
+            border-radius: 5px;
+        }
+        .connected { color:#4caf50; background:#e8f5e8; }
+        .disconnected { color:#f44336; background:#ffebee; }
+
+        #messages {
+            border: 1px solid #ddd;
+            height: 400px;
+            overflow-y: scroll;
+            padding: 10px;
+            margin-bottom: 20px;
+            background-color: white;
+            border-radius: 8px;
+        }
+
+        .message {
+            margin: 8px 0;
+            padding: 10px;
+            border-radius: 8px;
+            border-left: 4px solid #ccc;
+            background-color: #f9f9f9;
+            position: relative;
+        }
+        .message.urgent { background:#ffebee; border-left-color:#f44336; animation: urgentPulse 2s infinite; }
+        .message.high { background:#fff3e0; border-left-color:#ff9800; }
+        .message.normal { background:#f1f8e9; border-left-color:#4caf50; }
+        .message.low { background:#f3e5f5; border-left-color:#9c27b0; }
+        @keyframes urgentPulse {
+            0% { box-shadow:0 0 0 0 rgba(244,67,54,0.7); }
+            70% { box-shadow:0 0 0 10px rgba(244,67,54,0); }
+            100% { box-shadow:0 0 0 0 rgba(244,67,54,0); }
+        }
+
+        .message-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; }
+        .message-user { font-weight:bold; color:#333; }
+        .message-priority { font-size:12px; padding:2px 8px; border-radius:12px; color:white; font-weight:bold; }
+        .priority-urgent { background-color:#f44336; }
+        .priority-high { background-color:#ff9800; }
+        .priority-normal { background-color:#4caf50; }
+        .priority-low { background-color:#9c27b0; }
+        .message-text { margin-top:5px; line-height:1.4; }
+        .priority-separator { text-align:center; margin:15px 0 10px 0; font-size:12px; font-weight:bold; color:#666; border-bottom:2px solid #eee; padding-bottom:5px; }
+
+        .input-section { background-color:white; padding:20px; border-radius:8px; border:1px solid #ddd; margin-bottom:20px; }
+        #userInput, #messageInput { flex:1; padding:10px; border:1px solid #ccc; border-radius:5px; font-size:14px; }
+        .message-input-section { display:flex; gap:10px; }
+        #sendBtn { padding:12px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; }
+        #sendBtn:hover { transform:translateY(-1px); box-shadow:0 4px 8px rgba(0,0,0,0.2); }
+
+        .priority-buttons { display:flex; gap:5px; margin-bottom:10px; flex-wrap:wrap; }
+        .priority-btn { padding:8px 12px; border:none; border-radius:5px; cursor:pointer; font-size:12px; font-weight:bold; color:white; }
+        .priority-btn.active { box-shadow:0 0 0 2px #333; }
+        .priority-urgent { background:#f44336; }
+        .priority-high { background:#ff9800; }
+        .priority-normal { background:#4caf50; }
+        .priority-low { background:#9c27b0; }
+        .priority-auto { background:#607d8b; }
+
+        .stats-display { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-top:10px; }
+        .stats-display p { background:#f8f9fa; padding:8px; border-radius:4px; margin:0; font-size:14px; }
+        .stats-display span { font-weight:bold; color:#667eea; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>Priority Chat System</h1>
+    <p>Enhanced with Batch Processing & Retry Logic</p>
+</div>
+
+<div id="status" class="disconnected">Status: Disconnected</div>
+
+<div id="messages"></div>
+
+<div class="input-section">
+    <input type="text" id="userInput" placeholder="Enter your name..." value="Anonymous">
+
+    <div class="priority-buttons">
+        <button class="priority-btn priority-urgent" onclick="setPriority(1)">🚨 URGENT</button>
+        <button class="priority-btn priority-high" onclick="setPriority(2)">⚡ HIGH</button>
+        <button class="priority-btn priority-normal active" onclick="setPriority(3)">✅ NORMAL</button>
+        <button class="priority-btn priority-low" onclick="setPriority(4)">💤 LOW</button>
+        <button class="priority-btn priority-auto" onclick="setPriority(null)">🤖 AUTO</button>
+    </div>
+
+    <div class="message-input-section">
+        <input type="text" id="messageInput" placeholder="Type your message here..." maxlength="2000">
+        <button id="sendBtn">Send</button>
+    </div>
+</div>
+
+<!-- Batch Queue Section -->
+<div class="input-section">
+    <h3>Batch Queue Demo</h3>
+    <button onclick="sendTestBatch()">Send 8 Messages (Test Batching)</button>
+    <button onclick="forceSendBatch()">Force Send Current Batch</button>
+    <div class="stats-display">
+        <p>Current Batch Size: <span id="currentBatchSize">0</span></p>
+        <p>Total Batches Sent: <span id="totalBatches">0</span></p>
+        <p>Network Efficiency: <span id="efficiency">0%</span></p>
+    </div>
+</div>
+
+<!-- Retry Queue Section -->
+<div class="input-section">
+    <h3>Retry Queue Demo</h3>
+    <button onclick="simulateFailure()">Send Test Message</button>
+    <button onclick="forceRetryAll()">Force Retry All Failed</button>
+    <div class="stats-display">
+        <p>Messages in Retry: <span id="retryCount">0</span></p>
+        <p>Retry Success Rate: <span id="retrySuccessRate">0%</span></p>
+        <p>Total Retry Attempts: <span id="totalRetries">0</span></p>
+    </div>
+</div>
+
+<script>
+    let selectedPriority = null;
+
+    function setPriority(priority) {
+        selectedPriority = priority;
+        document.querySelectorAll('.priority-btn').forEach(btn => btn.classList.remove('active'));
+        if (priority === 1) document.querySelector('.priority-urgent').classList.add('active');
+        else if (priority === 2) document.querySelector('.priority-high').classList.add('active');
+        else if (priority === 3) document.querySelector('.priority-normal').classList.add('active');
+        else if (priority === 4) document.querySelector('.priority-low').classList.add('active');
+        else document.querySelector('.priority-auto').classList.add('active');
+    }
+
+    class MessageSystemUI {
+        constructor() {
+            this.socket = null;
+            this.isConnected = false;
+            this.statsUpdateInterval = null;
+            this.allMessages = [];
+            this.initializeWebSocket();
+            this.startStatsUpdates();
+        }
+
+        initializeWebSocket() {
+            this.socket = new WebSocket('ws://localhost:8000/ws');
+            this.socket.onopen = () => { this.isConnected = true; this.updateStatus('Connected - Enhanced System Active!','connected'); };
+            this.socket.onclose = () => { this.isConnected = false; this.updateStatus('Disconnected','disconnected'); };
+            this.socket.onerror = (e) => { this.updateStatus('Connection Error','disconnected'); console.error(e); };
+            this.socket.onmessage = (event) => this.handleServerMessage(JSON.parse(event.data));
+        }
+
+        sendMessage(messageText, priority='AUTO') {
+            if (!this.isConnected) return;
+            const data = { action:'send_message', message: messageText, user: document.getElementById('userInput').value||'Anonymous', priority: priority==='AUTO'?null:this.getPriorityNumber(priority)};
+            this.socket.send(JSON.stringify(data));
+        }
+
+        sendTestBatch() { for(let i=1;i<=8;i++){ setTimeout(()=>{ this.sendMessage(`Test batch message ${i}`,'NORMAL'); }, i*100); } }
+        forceSendBatch() { this.socket.send(JSON.stringify({action:'force_send_batch'})); }
+        sendTestRetryMessage() { this.socket.send(JSON.stringify({action:'send_test_retry_message'})); }
+        forceRetryAll() { this.socket.send(JSON.stringify({action:'force_retry_all'})); }
+
+        handleServerMessage(data){
+            switch(data.type){
+                case 'stats_update': this.updateStats(data.stats); break;
+                case 'message_added': this.updateMessages(data.messages); break;
+            }
+        }
+
+        updateStats(stats){
+            if(stats.batch_queue){
+                document.getElementById('currentBatchSize').textContent = stats.batch_queue.messages_in_current_batch||0;
+                document.getElementById('totalBatches').textContent = stats.batch_queue.total_batches_sent||0;
+                document.getElementById('efficiency').textContent = (stats.batch_queue.network_efficiency_percent||0)+'%';
+            }
+            if(stats.retry_queue){
+                document.getElementById('retryCount').textContent = stats.retry_queue.current_queue_size||0;
+                document.getElementById('retrySuccessRate').textContent = (stats.retry_queue.retry_success_rate||0)+'%';
+                document.getElementById('totalRetries').textContent = stats.retry_queue.total_retry_attempts||0;
+            }
+        }
+
+        updateMessages(messages){
+            const container=document.getElementById('messages');
+            this.allMessages.push(...messages);
+            this.allMessages.sort((a,b)=>a.priority-b.priority||a.timestamp-b.timestamp);
+            container.innerHTML='';
+            const names={1:'URGENT',2:'HIGH',3:'NORMAL',4:'LOW'};
+            [1,2,3,4].forEach(priority=>{
+                const group=this.allMessages.filter(m=>m.priority===priority);
+                if(group.length){
+                    const sep=document.createElement('div'); sep.className='priority-separator'; sep.textContent=names[priority]+' PRIORITY ('+group.length+' messages)'; container.appendChild(sep);
+                    group.forEach(msg=>{
+                        const div=document.createElement('div'); div.className='message '+names[priority].toLowerCase();
+                        div.innerHTML=`<div class="message-header"><span class="message-user">${msg.user}</span><span class="message-priority priority-${names[priority].toLowerCase()}">${names[priority]}</span></div><div class="message-text">${msg.text}</div>`;
+                        container.appendChild(div);
+                    });
+                }
+            });
+            container.scrollTop=container.scrollHeight;
+        }
+
+        startStatsUpdates(){ this.statsUpdateInterval=setInterval(()=>{ if(this.isConnected)this.socket.send(JSON.stringify({action:'get_comprehensive_stats'})); },2000); }
+        getPriorityNumber(priority){ const map={ 'URGENT':1,'HIGH':2,'NORMAL':3,'LOW':4 }; return map[priority]||3; }
+        updateStatus(msg,type){ const status=document.getElementById('status'); status.textContent='Status: '+msg; status.className=type; }
+        cleanup(){ clearInterval(this.statsUpdateInterval); if(this.socket)this.socket.close(); }
+    }
+
+    const messageSystemUI=new MessageSystemUI();
+
+    document.getElementById('sendBtn').addEventListener('click',()=>{
+        const msg=document.getElementById('messageInput').value.trim();
+        const activeBtn=document.querySelector('.priority-btn.active');
+        const priority=activeBtn?activeBtn.textContent.replace(/[\s]/g,''):'AUTO';
+        if(msg){ messageSystemUI.sendMessage(msg,priority); document.getElementById('messageInput').value=''; }
+    });
+
+    function sendTestBatch(){ messageSystemUI.sendTestBatch(); }
+    function forceSendBatch(){ messageSystemUI.forceSendBatch(); }
+    function simulateFailure(){ messageSystemUI.sendTestRetryMessage(); }
+    function forceRetryAll(){ messageSystemUI.forceRetryAll(); }
+
+    window.addEventListener('beforeunload',()=>messageSystemUI.cleanup());
+</script>
+
+</body>
+</html>
