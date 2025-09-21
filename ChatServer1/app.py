@@ -120,23 +120,33 @@ class DisplayMessageQueue:
     def add_batch_messages(self, messages: List[Dict]):
         """Add messages from completed batch to display queues"""
         added_count = 0
-        
+
         for message_data in messages:
             priority = message_data.get("priority", 3)
-            
+
             # Add unique message ID if not present
             if "id" not in message_data:
                 self.message_counter += 1
                 message_data["id"] = self.message_counter
-            
+
             # Add to appropriate display queue
             self.display_queues[priority].append(message_data)
             added_count += 1
-            
+
             print(f"Added to DISPLAY: {self.priority_names[priority]} - '{message_data['text'][:30]}...'")
-        
+
         print(f"BATCH DISPLAYED: {added_count} messages now visible to users")
+
+        # 👇 AUTO-CLEAR if total reaches 10
+        if self.get_queue_stats()["total_messages"] >= 10:
+            cleared = self.clear_all()
+            print(f"⚠️ Auto-cleared display queues after {cleared} messages (limit = 10)")
+
+            # Notify clients chat is cleared
+            socketio.emit("message_organization", self.get_all_messages_organized())
+
         return added_count
+
     
     def get_all_messages_organized(self):
         """Get all messages organized by priority (what users see)"""
@@ -360,7 +370,7 @@ retry_queue = RetryQueue(
     failure_callback=retry_failure_callback
 )
 
-circular_queue = CircularQueue(max_size=1000)
+circular_queue = CircularQueue(max_size=10)
 
 # NEW: Initialize offline queue
 offline_queue = OfflineQueue(
